@@ -159,7 +159,7 @@ async function startCamera() {
 
 startBtn.addEventListener('click', startCamera);
 recordBtn.addEventListener('click', toggleRecording);
-setStatus('Gotowy • v8 Anime'); updateDiag();
+setStatus('Gotowy • v8.1 Anime 2D'); updateDiag();
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -301,77 +301,105 @@ in vec2 v_uv; out vec4 outColor;
 float lum(vec3 c){return dot(c,vec3(.299,.587,.114));}
 vec3 sat(vec3 c,float s){float l=lum(c);return mix(vec3(l),c,s);}
 vec3 poster(vec3 c,float n){return floor(c*n+.5)/n;}
-float ellipseMask(vec2 uv, vec2 c, vec2 r){vec2 d=(uv-c)/max(r,vec2(.0001));return 1.0-smoothstep(.72,1.05,dot(d,d));}
+float ellipseMask(vec2 uv, vec2 c, vec2 r){vec2 d=(uv-c)/max(r,vec2(.0001));return 1.0-smoothstep(.68,1.03,dot(d,d));}
 
-vec2 eyeWarp(vec2 uv, vec2 c, float radius, float strength){
-  vec2 d=uv-c; float r=length(d); if(r>=radius) return uv;
-  float t=1.0-r/radius; float s=1.0-strength*t*t;
-  return c+d*s;
+vec2 eyeWarp(vec2 uv, vec2 c, vec2 radius, float strength){
+  vec2 d=(uv-c)/max(radius,vec2(.0001));
+  float r=length(d);
+  if(r>=1.0) return uv;
+  float t=1.0-r;
+  float s=1.0-strength*t*t*(2.0-t);
+  return c+(uv-c)*s;
 }
 
 vec2 animeWarp(vec2 uv){
   if(u_faceOn==0) return uv;
   vec2 x=uv;
-  float eyeR=max(u_faceSize.x*.18,u_faceSize.y*.13);
-  x=eyeWarp(x,u_leftEye,eyeR,.27);
-  x=eyeWarp(x,u_rightEye,eyeR,.27);
+  vec2 eyeR=vec2(max(u_faceSize.x*.205,u_faceSize.y*.12), max(u_faceSize.y*.135,u_faceSize.x*.09));
+  x=eyeWarp(x,u_leftEye,eyeR,.38);
+  x=eyeWarp(x,u_rightEye,eyeR,.38);
 
   vec2 d=(x-u_faceCenter)/max(u_faceSize,vec2(.001));
-  float inside=1.0-smoothstep(.72,1.08,length(vec2(d.x*1.05,d.y*.88)));
-  float lower=smoothstep(-.02,.58,d.y)*inside;
-  // Output -> source: sample farther horizontally in lower face = visually narrower jaw.
-  x.x=u_faceCenter.x+(x.x-u_faceCenter.x)*(1.0+.18*lower);
-  // Slight vertical compression of lower face/chin.
-  x.y=u_faceCenter.y+(x.y-u_faceCenter.y)*(1.0+.08*lower);
-  return clamp(x,vec2(0.001),vec2(.999));
+  float faceInside=1.0-smoothstep(.66,1.02,length(vec2(d.x*1.05,d.y*.84)));
+  float lower=smoothstep(-.06,.62,d.y)*faceInside;
+  float chin=smoothstep(.20,.72,d.y)*faceInside;
+  // sample wider source coordinates -> visually narrower anime jaw
+  x.x=u_faceCenter.x+(x.x-u_faceCenter.x)*(1.0+.30*lower);
+  // slightly shorter lower face / smaller chin
+  x.y=u_faceCenter.y+(x.y-u_faceCenter.y)*(1.0+.14*chin);
+  return clamp(x,vec2(.001),vec2(.999));
 }
+
+vec3 sampleWarp(vec2 uv){return texture(u_tex,animeWarp(uv)).rgb;}
 
 void main(){
   vec2 uv=animeWarp(v_uv);
-  vec3 c=texture(u_tex,uv).rgb;
+  vec3 src=texture(u_tex,uv).rgb;
 
   float faceM=0.0;
-  if(u_faceOn==1) faceM=ellipseMask(v_uv,u_faceCenter,u_faceSize*vec2(.58,.70));
+  if(u_faceOn==1) faceM=ellipseMask(v_uv,u_faceCenter,u_faceSize*vec2(.60,.72));
 
-  vec3 blur=(
-    texture(u_tex,animeWarp(v_uv+vec2(u_texel.x,0.0))).rgb+
-    texture(u_tex,animeWarp(v_uv-vec2(u_texel.x,0.0))).rgb+
-    texture(u_tex,animeWarp(v_uv+vec2(0.0,u_texel.y))).rgb+
-    texture(u_tex,animeWarp(v_uv-vec2(0.0,u_texel.y))).rgb+
-    texture(u_tex,animeWarp(v_uv+u_texel)).rgb+
-    texture(u_tex,animeWarp(v_uv-u_texel)).rgb+c*2.0)/8.0;
-  c=mix(c,blur,.58*faceM+.18);
+  // Strong local smoothing: deliberately removes photographic skin/beard microtexture.
+  vec3 b1=(sampleWarp(v_uv+u_texel*vec2(-2.,0.))+sampleWarp(v_uv+u_texel*vec2(2.,0.))+
+           sampleWarp(v_uv+u_texel*vec2(0.,-2.))+sampleWarp(v_uv+u_texel*vec2(0.,2.))+
+           sampleWarp(v_uv+u_texel*vec2(-1.,-1.))+sampleWarp(v_uv+u_texel*vec2(1.,-1.))+
+           sampleWarp(v_uv+u_texel*vec2(-1.,1.))+sampleWarp(v_uv+u_texel*vec2(1.,1.))+src*4.0)/12.0;
+  vec3 b2=(sampleWarp(v_uv+u_texel*vec2(-4.,0.))+sampleWarp(v_uv+u_texel*vec2(4.,0.))+
+           sampleWarp(v_uv+u_texel*vec2(0.,-4.))+sampleWarp(v_uv+u_texel*vec2(0.,4.))+b1*4.0)/8.0;
+  float photoDetail=clamp(length(src-b1)*4.0,0.0,1.0);
+  vec3 c=mix(src,b1,.52+.28*faceM);
+  c=mix(c,b2,(.20+.34*faceM)*(1.0-photoDetail*.28));
 
-  float tl=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(-1.,-1.))).rgb);
-  float tc=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(0.,-1.))).rgb);
-  float tr=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(1.,-1.))).rgb);
-  float ml=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(-1.,0.))).rgb);
-  float mr=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(1.,0.))).rgb);
-  float bl=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(-1.,1.))).rgb);
-  float bc=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(0.,1.))).rgb);
-  float br=lum(texture(u_tex,animeWarp(v_uv+u_texel*vec2(1.,1.))).rgb);
+  // Sobel line extraction after smoothing.
+  float tl=lum(sampleWarp(v_uv+u_texel*vec2(-2.,-2.)));
+  float tc=lum(sampleWarp(v_uv+u_texel*vec2(0.,-2.)));
+  float tr=lum(sampleWarp(v_uv+u_texel*vec2(2.,-2.)));
+  float ml=lum(sampleWarp(v_uv+u_texel*vec2(-2.,0.)));
+  float mr=lum(sampleWarp(v_uv+u_texel*vec2(2.,0.)));
+  float bl=lum(sampleWarp(v_uv+u_texel*vec2(-2.,2.)));
+  float bc=lum(sampleWarp(v_uv+u_texel*vec2(0.,2.)));
+  float br=lum(sampleWarp(v_uv+u_texel*vec2(2.,2.)));
   float gx=-tl-2.*ml-bl+tr+2.*mr+br;
   float gy=-tl-2.*tc-tr+bl+2.*bc+br;
-  float edge=clamp(length(vec2(gx,gy))*2.9,0.,1.);
+  float edge=clamp(length(vec2(gx,gy))*2.35,0.,1.);
 
-  vec3 outc=poster(sat(c,1.30),8.0);
+  // Reduced palette + brighter anime midtones.
+  c=pow(max(c,vec3(0.0)),vec3(.88));
+  c=sat(c,1.20);
+  vec3 outc=poster(c,5.0);
   float l=lum(outc);
-  // Anime-like bright midtones and cool shadows.
-  outc=pow(outc,vec3(.90));
-  outc+=vec3(.035,.018,.04)*faceM;
-  outc=mix(outc,vec3(outc.r*.86,outc.g*.91,outc.b*1.08),smoothstep(.15,.55,1.0-l)*.22);
-  outc=mix(outc,vec3(.075,.055,.095),smoothstep(.17,.46,edge)*(.72+.10*faceM));
+
+  // Skin/face treatment: warm paper-like highlights, cool lavender shadows.
+  vec3 animeHi=vec3(1.00,.91,.88);
+  vec3 animeShadow=vec3(.56,.49,.66);
+  float highlight=smoothstep(.55,.88,l)*faceM;
+  float shadow=(1.0-smoothstep(.28,.58,l))*faceM;
+  outc=mix(outc,mix(outc,animeHi,.19),highlight*.64);
+  outc=mix(outc,mix(outc,animeShadow,.20),shadow*.55);
+
+  // Compress beard/hair microtexture into larger dark graphic masses.
+  float darkRegion=1.0-smoothstep(.18,.44,l);
+  outc=mix(outc,poster(b2,4.0)*vec3(.88,.90,.98),darkRegion*.34);
+
+  // Thin dark-purple linework, suppressing tiny photographic noise.
+  float line=smoothstep(.21,.52,edge)*(1.0-smoothstep(.48,.84,photoDetail));
+  vec3 ink=vec3(.055,.040,.085);
+  outc=mix(outc,ink,line*(.76+.10*faceM));
 
   if(u_faceOn==1){
-    float le=ellipseMask(v_uv,u_leftEye,vec2(u_faceSize.x*.13,u_faceSize.y*.075));
-    float re=ellipseMask(v_uv,u_rightEye,vec2(u_faceSize.x*.13,u_faceSize.y*.075));
+    float le=ellipseMask(v_uv,u_leftEye,vec2(u_faceSize.x*.145,u_faceSize.y*.086));
+    float re=ellipseMask(v_uv,u_rightEye,vec2(u_faceSize.x*.145,u_faceSize.y*.086));
     float eyes=max(le,re);
-    // Brighter sclera/highlights, darker iris/line impression from original enlarged eye texture.
-    float eyeLum=lum(texture(u_tex,animeWarp(v_uv)).rgb);
-    outc=mix(outc,outc+vec3(.13,.12,.16),eyes*smoothstep(.48,.78,eyeLum)*.48);
-    outc=mix(outc,outc*vec3(.68,.66,.76),eyes*(1.0-smoothstep(.20,.48,eyeLum))*.42);
-    float mouth=ellipseMask(v_uv,u_mouth,vec2(u_faceSize.x*.16,u_faceSize.y*.055));
-    outc=mix(outc,vec3(outc.r*1.10,outc.g*.82,outc.b*.90),mouth*.18);
+    float eyeLum=lum(sampleWarp(v_uv));
+    // cleaner, brighter anime eye whites
+    outc=mix(outc,vec3(.98,.97,1.0),eyes*smoothstep(.46,.73,eyeLum)*.50);
+    // deep iris / lash impression
+    outc=mix(outc,vec3(.045,.035,.075),eyes*(1.0-smoothstep(.24,.50,eyeLum))*.58);
+    // subtle cool eye tint
+    outc=mix(outc,vec3(.22,.32,.48),eyes*smoothstep(.26,.54,eyeLum)*(1.0-smoothstep(.66,.88,eyeLum))*.18);
+
+    float mouth=ellipseMask(v_uv,u_mouth,vec2(u_faceSize.x*.17,u_faceSize.y*.057));
+    outc=mix(outc,vec3(.58,.20,.29),mouth*(1.0-smoothstep(.46,.70,eyeLum))*.16);
   }
 
   outColor=vec4(clamp(outc,0.,1.),1.);
@@ -465,6 +493,60 @@ function applyAnimeFx(q) {
   ctx.restore();
 }
 
+
+const LEFT_EYE_LINE = [33,160,158,133,153,144,33];
+const RIGHT_EYE_LINE = [362,385,387,263,373,380,362];
+const LEFT_BROW = [70,63,105,66,107];
+const RIGHT_BROW = [336,296,334,293,300];
+const UPPER_LIP = [61,185,40,39,37,0,267,269,270,409,291];
+const LOWER_LIP = [61,146,91,181,84,17,314,405,321,375,291];
+const NOSE_LINE = [168,6,197,195,5,4];
+
+function drawLandmarkLine(pts, indices, width, color, close = false) {
+  const selected = indices.map(i => pts[i]).filter(Boolean);
+  if (selected.length < 2) return;
+  ctx.beginPath();
+  selected.forEach((p, i) => {
+    const x = p.x * canvas.width, y = p.y * canvas.height;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  if (close) ctx.closePath();
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = color; ctx.stroke();
+}
+
+function drawAnimeLineArt(q) {
+  if (!latestFace?.length || !rawFaceData(q)) return;
+  const pts = latestFace.map(mirrorPoint);
+  const mask = triangleUnionPath(q);
+  const w = Math.max(1.6, canvas.width * .00225);
+  const ink = 'rgba(31,18,43,.82)';
+  ctx.save(); ctx.clip(mask);
+
+  // clean face silhouette and graphic facial features
+  drawLandmarkLine(pts, FACE_OVAL, w * 1.05, 'rgba(39,24,48,.64)', true);
+  drawLandmarkLine(pts, LEFT_BROW, w * 1.65, ink);
+  drawLandmarkLine(pts, RIGHT_BROW, w * 1.65, ink);
+  drawLandmarkLine(pts, LEFT_EYE_LINE, w * 1.48, 'rgba(24,15,40,.92)', true);
+  drawLandmarkLine(pts, RIGHT_EYE_LINE, w * 1.48, 'rgba(24,15,40,.92)', true);
+  drawLandmarkLine(pts, NOSE_LINE, w * .55, 'rgba(70,43,62,.42)');
+  drawLandmarkLine(pts, UPPER_LIP, w * .88, 'rgba(91,35,55,.72)');
+  drawLandmarkLine(pts, LOWER_LIP, w * .68, 'rgba(125,51,71,.52)');
+
+  // iris / catch-light marks based on eye centers
+  const face = rawFaceData(q);
+  if (face) {
+    for (const e of [mirrorPoint(face.leftEye), mirrorPoint(face.rightEye)]) {
+      const ex = e.x * canvas.width, ey = e.y * canvas.height;
+      const r = Math.max(3.5, canvas.width * Math.max(face.size.x, .08) * .018);
+      ctx.fillStyle = 'rgba(32,34,65,.80)'; ctx.beginPath(); ctx.arc(ex, ey, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.88)'; ctx.beginPath(); ctx.arc(ex-r*.28, ey-r*.30, r*.28, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
 function drawFrame(q) {
   const cq = canvasQuad(q);
   ctx.save(); pathQuad(cq); ctx.lineWidth = Math.max(3, canvas.width * .004); ctx.strokeStyle = 'rgba(255,255,255,.98)';
@@ -490,7 +572,7 @@ function drawDebug(semantic, q, rawQuad) {
 }
 
 function preferredMimeType() {
-  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  const candidates = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   return candidates.find(t => window.MediaRecorder?.isTypeSupported?.(t)) || '';
 }
 function toggleRecording() {
@@ -536,9 +618,9 @@ async function renderLoop(ts) {
   const rawQuad = measureFreeformQuad(semantic);
   const q = smoothFreeformQuad(rawQuad, ts);
   if (q) {
-    applyAnimeFx(q); drawFrame(q);
+    applyAnimeFx(q); drawAnimeLineArt(q); drawFrame(q);
     const faceInside = !!rawFaceData(q);
-    setStatus(`2/2 dłonie · Anime v8${faceInside ? ' · face warp' : ''}`);
+    setStatus(`2/2 dłonie · Anime 2D v8.1${faceInside ? ' · face warp' : ''}`);
   } else if (handsReady) {
     const count = Math.min(2, semantic.length); setStatus(`${count}/2 dłonie${count === 2 ? ' · rozsuń palce' : ''}`);
   }
