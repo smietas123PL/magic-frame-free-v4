@@ -1,6 +1,6 @@
 {
   "name": "magic-frame-free-v9-2-cartoon-tfjs",
-  "version": "9.2.0",
+  "version": "9.2.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,5 +17,7 @@
   "devDependencies": {
     "vite": "6.1.0"
   },
-  "engines": { "node": ">=18.18.0" }
+  "engines": {
+    "node": ">=18.18.0"
+  }
 }

@@ -171,7 +171,7 @@ async function startCamera() {
 
 startBtn.addEventListener('click', startCamera);
 recordBtn.addEventListener('click', toggleRecording);
-setStatus('Gotowy • v9.2.1 Camera-first'); updateDiag();
+setStatus('Gotowy • v9.2.2 Camera-first');
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -438,6 +438,9 @@ function updateDiag() {
   const fps = cartoonReady ? ` · AI ${cartoonFps.toFixed(1)}fps · H ${handFps.toFixed(0)}fps · R ${renderFps.toFixed(0)}fps · ${currentAiSize()}px · skip ${skippedBusy}` : '';
   diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · CartoonGAN: ${cartoonState}${perf}${fps}`;
 }
+
+// Pierwsza diagnostyka dopiero po inicjalizacji wszystkich stanów CartoonGAN.
+updateDiag();
 
 function tickHandFps(now) {
   handCompleted++;
