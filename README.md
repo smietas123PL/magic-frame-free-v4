@@ -1,23 +1,30 @@
-# Magic Frame Free v6
+# Magic Frame Free v6.1
 
-Darmowy realtime finger-frame effect dla przeglądarki i Vercel.
+Darmowa aplikacja realtime pod Vercel: Vite + MediaPipe Hand Landmarker + Face Landmarker.
 
-## Co nowego w v6
-- prawdziwy obracany czworokąt z 4 fingertipów zamiast osiowego prostokąta,
-- lokalny MediaPipe Face Landmarker,
-- Anime Face: powiększane oczy + kontury + stylizacja,
-- Comic Face: kontur szczęki + mocniejsza stylizacja,
-- Clay Face: miękkie tonowanie skóry,
-- pełny fallback GPU → CPU,
-- brak płatnych API i brak importów MediaPipe z CDN.
+## Zmiany v6.1
+
+- ramka aktywuje się natychmiast po wykryciu 2 dłoni,
+- brak wymogu gestu L i wyprostowanych palców,
+- status pokazuje `0/2`, `1/2` lub `2/2 dłonie`,
+- mocniejsze wygładzanie ruchu ramki,
+- 550 ms podtrzymania ramki przy chwilowym zgubieniu dłoni,
+- zachowane efekty i Face Landmarker z v6,
+- brak płatnych API.
 
 ## Lokalnie
+
 ```powershell
 npm install
 npm run dev
 ```
 
-## Build
+## Build / Vercel
+
 ```powershell
+npm install
 npm run build
+vercel --prod
 ```
+
+Build kopiuje MediaPipe WASM z npm oraz pobiera oficjalne modele dłoni i twarzy do `public/models`.

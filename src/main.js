@@ -32,7 +32,7 @@ let faceState = '—';
 
 const HAND_INTERVAL = 1000 / 24;
 const FACE_INTERVAL = 1000 / 18;
-const QUAD_HOLD_MS = 300;
+const QUAD_HOLD_MS = 550;
 
 function setStatus(text) { statusEl.textContent = text; }
 function updateDiag() { diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · twarz: ${faceState}`; }
@@ -103,7 +103,7 @@ async function initVision() {
       faceState = 'CPU OK';
     }
     faceReady = true; updateDiag();
-    setStatus('Pokaż obie dłonie');
+    setStatus('0/2 dłonie');
   } catch (err) {
     console.error(err);
     if (!handsReady) handState = 'BŁĄD';
@@ -136,7 +136,7 @@ async function startCamera() {
 }
 
 startBtn.addEventListener('click', startCamera);
-setStatus('Gotowy • v6'); updateDiag();
+setStatus('Gotowy • v6.1'); updateDiag();
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -149,11 +149,6 @@ function sortHands(hands, handedness) {
   out.sort((a,b) => a.pts[0].x - b.pts[0].x); return out;
 }
 function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
-function handReady(pts) {
-  const wrist=pts[0], thumbMcp=pts[2], thumbTip=pts[4], indexMcp=pts[5], indexPip=pts[6], indexTip=pts[8];
-  const palm=Math.max(dist(wrist,indexMcp),.045);
-  return dist(indexTip,indexMcp)/palm>.68 && dist(thumbTip,thumbMcp)/palm>.38 && dist(indexTip,thumbTip)/palm>.44 && dist(indexTip,wrist)>dist(indexPip,wrist)*1.015;
-}
 function orderClockwise(points) {
   const cx=points.reduce((s,p)=>s+p.x,0)/points.length, cy=points.reduce((s,p)=>s+p.y,0)/points.length;
   const ordered=[...points].sort((a,b)=>Math.atan2(a.y-cy,a.x-cx)-Math.atan2(b.y-cy,b.x-cx));
@@ -163,11 +158,17 @@ function orderClockwise(points) {
 }
 function polygonArea(q){ let a=0; for(let i=0;i<q.length;i++){const p=q[i],n=q[(i+1)%q.length];a+=p.x*n.y-n.x*p.y;} return Math.abs(a)/2; }
 function computeQuad(sorted) {
+  // v6.1: dwie poprawnie wykryte dłonie od razu aktywują ramkę.
+  // Nie wymagamy już pozycji L ani wyprostowanych palców.
   if(sorted.length<2) return null;
   const a=sorted[0].pts,b=sorted[1].pts;
-  if(!handReady(a)||!handReady(b)) return null;
-  const q=orderClockwise([a[4],a[8],b[4],b[8]].map(p=>({x:Math.min(1,Math.max(0,p.x)),y:Math.min(1,Math.max(0,p.y))})));
-  if(polygonArea(q)<.012) return null;
+  if(!a?.[4] || !a?.[8] || !b?.[4] || !b?.[8]) return null;
+  const q=orderClockwise([a[4],a[8],b[4],b[8]].map(p=>({
+    x:Math.min(1,Math.max(0,p.x)),
+    y:Math.min(1,Math.max(0,p.y))
+  })));
+  // Odrzucamy tylko ramki praktycznie zerowej wielkości.
+  if(polygonArea(q)<.0045) return null;
   return q;
 }
 function smoothQuadrilateral(next, now) {
@@ -176,7 +177,7 @@ function smoothQuadrilateral(next, now) {
     if(!smoothQuad){ smoothQuad=next.map(p=>({...p})); return smoothQuad; }
     const oldC=smoothQuad.reduce((s,p)=>({x:s.x+p.x/4,y:s.y+p.y/4}),{x:0,y:0});
     const newC=next.reduce((s,p)=>({x:s.x+p.x/4,y:s.y+p.y/4}),{x:0,y:0});
-    const jump=dist(oldC,newC), alpha=jump>.16?.44:.25;
+    const jump=dist(oldC,newC), alpha=jump>.18?.34:.16;
     for(let i=0;i<4;i++){smoothQuad[i].x+=(next[i].x-smoothQuad[i].x)*alpha;smoothQuad[i].y+=(next[i].y-smoothQuad[i].y)*alpha;}
     return smoothQuad;
   }
@@ -260,7 +261,13 @@ async function renderLoop(ts){
   if(handsReady&&handLandmarker&&video.readyState>=2&&ts-lastHandDetect>HAND_INTERVAL){lastHandDetect=ts;try{const r=handLandmarker.detectForVideo(video,ts);latestHands=r.landmarks||[];latestHandedness=r.handedness||[];}catch(e){console.warn(e)}}
   if(faceReady&&faceLandmarker&&video.readyState>=2&&ts-lastFaceDetect>FACE_INTERVAL){lastFaceDetect=ts;try{const r=faceLandmarker.detectForVideo(video,ts);latestFace=r.faceLandmarks?.[0]||null;}catch(e){console.warn(e)}}
   const sorted=sortHands(latestHands,latestHandedness),raw=computeQuad(sorted),q=smoothQuadrilateral(raw,ts);
-  if(q){applyBaseEffect(q,effectSelect.value);drawFaceStyle(q,effectSelect.value);drawFrame(q);setStatus(`Efekt: ${effectSelect.options[effectSelect.selectedIndex].text}`)}
-  else if(handsReady)setStatus(sorted.length<2?'Pokaż obie dłonie':'Wyciągnij kciuki i palce wskazujące');
+  if(q){
+    applyBaseEffect(q,effectSelect.value);drawFaceStyle(q,effectSelect.value);drawFrame(q);
+    setStatus(`2/2 dłonie · ${effectSelect.options[effectSelect.selectedIndex].text}`);
+  }
+  else if(handsReady){
+    const count=Math.min(2,sorted.length);
+    setStatus(`${count}/2 dłonie${count===2?' · ustaw palce szerzej':''}`);
+  }
   drawDebug(sorted); requestAnimationFrame(renderLoop);
 }
