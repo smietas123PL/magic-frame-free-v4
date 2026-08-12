@@ -1,33 +1,33 @@
-# Magic Frame Free v7.1
+# Magic Frame Free v7.2
 
-Darmowy prototyp realtime pod Vercel: kamera + MediaPipe Hand/Face Landmarker + stabilna Virtual Frame + lokalny WebGL toon renderer.
+Darmowy prototyp realtime pod Vercel: kamera + MediaPipe Hand/Face Landmarker + freeform/self-crossing quad + lokalny WebGL toon renderer.
 
-## Co zmienia v7
-- ramka nie jest już surowym quadem z 4 fingertipów,
-- dłonie sterują pozycją, szerokością i obrotem stabilnego wirtualnego okna,
-- wysokość jest stabilizowana i ograniczana sensownymi proporcjami,
-- 700 ms hold przy chwilowym zgubieniu dłoni,
-- WebGL toon renderer: Anime, Comic, Clay, Cyberpunk, B&W,
-- Face Landmarker wzmacnia oczy/kontur dla efektów twarzy,
-- Debug pokazuje landmarki, uchwyty, oś virtual frame i maskę twarzy.
+## Co zmienia v7.2
+
+- P0 = lewy index tip, P1 = prawy index tip, P2 = prawy thumb tip, P3 = lewy thumb tip.
+- Punkty nie są sortowane po obwodzie i nie są prostowane do prostokąta.
+- Dozwolone są quady wypukłe, wklęsłe i samoprzecinające (bow-tie / `|><|`).
+- Każdy narożnik ma osobny ultra-lekki filtr: 88–100% nowego pomiaru zależnie od szybkości ruchu.
+- Krótka predykcja ruchu kompensuje część jednej klatki opóźnienia.
+- Dropout hold skrócony do 90 ms.
+- Efekt jest kompozytowany jako dwa stałe trójkąty, więc przecięcie krawędzi nie jest automatycznie naprawiane.
+- Tożsamość lewej/prawej dłoni jest podtrzymywana także podczas krzyżowania rąk.
+- Debug pokazuje raw P0–P3 (turkus, przerywana linia) i finalny quad (niebieski).
+- Hand tracking celuje w 30 detekcji/s, kamera prosi o maks. 60 FPS.
 
 ## Lokalnie
+
+```powershell
 npm install
 npm run dev
+```
 
 ## Build / Vercel
+
+```powershell
 npm run build
+```
 
-Build kopiuje WASM MediaPipe i pobiera modele Hand Landmarker + Face Landmarker do public/models.
+Build kopiuje WASM MediaPipe z npm i pobiera oficjalne modele Hand Landmarker oraz Face Landmarker do `public/models`.
 
-
-## v7.1 — aggressive / low-latency tracking
-
-- Hand tracking target: 30 detections/s.
-- Camera requests up to 60 FPS when the device supports it.
-- Virtual-frame position uses 72–96% of the newest measurement depending on motion speed.
-- Angle follows at 88% per update.
-- Size follows at 68% with only a tiny dead-zone for jitter.
-- Dropout hold reduced from 700 ms to 120 ms.
-- Short motion prediction compensates roughly half a detection frame.
-- Debug mode: cyan dashed quad = raw MediaPipe-derived frame; solid frame = final rendered frame.
+Nie jest potrzebny żaden płatny API key.
