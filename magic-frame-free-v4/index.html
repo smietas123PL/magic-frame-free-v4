@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="color-scheme" content="dark" />
+  <title>Magic Frame Free v4</title>
+</head>
+<body>
+  <main id="app">
+    <section class="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div id="status" class="status">Ładowanie JS…</div>
+      <div id="diag" class="diag">JS: … · kamera: — · tracker: —</div>
+    </section>
+
+    <section class="controls">
+      <button id="startBtn" class="primary">Uruchom kamerę</button>
+      <select id="effectSelect" aria-label="Efekt obrazu">
+        <option value="comic">Comic</option>
+        <option value="anime">Anime Look</option>
+        <option value="cyber">Cyberpunk</option>
+        <option value="clay">Clay</option>
+        <option value="glitch">Glitch</option>
+        <option value="bw">B&amp;W</option>
+      </select>
+      <label class="toggle"><input id="debugToggle" type="checkbox" /> Punkty dłoni</label>
+    </section>
+
+    <section class="help">
+      <p>Pokaż obie dłonie i ułóż kciuki oraz palce wskazujące w dwa gesty „L”. Efekt pojawi się tylko wewnątrz ramki.</p>
+      <p id="errorDetails" class="error-details" hidden></p>
+    </section>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
