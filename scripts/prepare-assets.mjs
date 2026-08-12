@@ -17,6 +17,11 @@ const assets = [
     label: 'MediaPipe Hand Landmarker'
   },
   {
+    target: path.join(root, 'public', 'models', 'Shinkai_53.onnx'),
+    url: 'https://raw.githubusercontent.com/TachibanaYoshino/AnimeGANv2/master/pb_and_onnx_model/Shinkai_53.onnx',
+    label: 'AnimeGANv2 Shinkai 256 ONNX'
+  },
+  {
     target: path.join(root, 'public', 'models', 'face_paint_512_v2_0.onnx'),
     url: 'https://huggingface.co/akhaliq/AnimeGANv2-ONNX/resolve/9d1a763dc816409bdf940e6eba51759d79679115/face_paint_512_v2_0.onnx?download=true',
     label: 'AnimeGANv2 Face Portrait v2 ONNX'

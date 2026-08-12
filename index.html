@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
   <meta name="color-scheme" content="dark" />
-  <title>Magic Frame Free v9 · AnimeGAN</title>
+  <title>Magic Frame Free v9.1 · AnimeGAN Performance</title>
 </head>
 <body>
   <main id="app">
     <section class="stage">
       <video id="video" playsinline muted></video>
       <canvas id="canvas"></canvas>
-      <canvas id="animeCanvas" hidden width="512" height="512"></canvas>
-      <canvas id="inputCanvas" hidden width="512" height="512"></canvas>
+      <canvas id="animeCanvas" hidden width="256" height="256"></canvas>
+      <canvas id="inputCanvas" hidden width="256" height="256"></canvas>
       <div id="status" class="status">Ładowanie JS…</div>
       <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · AnimeGAN: —</div>
       <div id="recBadge" class="rec-badge" hidden>● REC</div>
@@ -23,15 +23,16 @@
       <button id="startBtn" class="primary">Uruchom kamerę</button>
       <button id="recordBtn" class="secondary" disabled>Nagraj</button>
       <select id="effectSelect" aria-label="Efekt obrazu">
-        <option value="animegan">AnimeGAN Face Portrait v2</option>
+        <option value="fast">Anime FAST 256 · Shinkai</option>
+        <option value="quality">Anime QUALITY 512 · Face Portrait v2</option>
         <option value="original">Oryginał w ramce</option>
       </select>
       <label class="toggle"><input id="debugToggle" type="checkbox" /> Debug tracking</label>
     </section>
 
     <section class="help">
-      <p><strong>v9:</strong> śledzenie dłoni i freeform/self-crossing quad pozostają lokalne i szybkie. Styl anime generuje prawdziwy model <strong>AnimeGANv2 Face Portrait v2</strong> uruchamiany lokalnie przez ONNX Runtime Web. Edge/Chrome najpierw używa WebGPU; jeśli model nie przejdzie na GPU, aplikacja automatycznie przełączy się na WASM. Model działa tylko wtedy, gdy ramka jest aktywna.</p>
-      <p><strong>Uwaga:</strong> tracking działa 30 FPS niezależnie od szybkości AI. Anime może aktualizować się rzadziej — aplikacja pokazuje ostatnią wygenerowaną klatkę bez opóźniania ramki.</p>
+      <p><strong>v9.1:</strong> śledzenie dłoni i freeform/self-crossing quad pozostają lokalne i szybkie. Styl anime generuje prawdziwy AnimeGANv2 lokalnie przez ONNX Runtime Web. Domyślny <strong>FAST 256</strong> używa modelu Shinkai i priorytetowo traktuje szybkość. <strong>QUALITY 512</strong> zachowuje Face Portrait v2. Edge/Chrome najpierw używa WebGPU; jeśli model nie przejdzie na GPU, aplikacja automatycznie przełączy się na WASM. Model działa tylko wtedy, gdy ramka jest aktywna.</p>
+      <p><strong>Uwaga:</strong> tracking działa 30 FPS niezależnie od szybkości AI. AI działa w trybie <strong>latest-frame-wins</strong>: nie ma kolejki starych klatek. Po zakończeniu inference brana jest od razu najnowsza klatka, a gotowy wynik jest mapowany do aktualnej pozycji wielokąta.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>
   </main>

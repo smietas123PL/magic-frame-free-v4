@@ -41,7 +41,20 @@ let lastHandDetect = 0;
 let lastAnimeStart = 0;
 let lastAnimeDone = 0;
 let lastAnimeMs = 0;
-let animeInterval = 130;
+let animeInterval = 0;
+let selectedProfile = 'fast';
+let modelSize = 256;
+let modelLayout = 'nhwc';
+let aiCompleted = 0;
+let aiWindowStart = performance.now();
+let aiFps = 0;
+let handCompleted = 0;
+let handWindowStart = performance.now();
+let handFps = 0;
+let renderCompleted = 0;
+let renderWindowStart = performance.now();
+let renderFps = 0;
+let skippedBusy = 0;
 let animeFrameValid = false;
 let animeMapping = null;
 let cameraState = '—';
@@ -53,12 +66,16 @@ let recordingStartedAt = 0;
 
 const HAND_INTERVAL = 1000 / 30;
 const FRAME_HOLD_MS = 90;
-const MODEL_SIZE = 512;
+const PROFILES = {
+  fast: { label: 'FAST 256', size: 256, layout: 'nhwc', model: '/models/Shinkai_53.onnx' },
+  quality: { label: 'QUALITY 512', size: 512, layout: 'nchw', model: '/models/face_paint_512_v2_0.onnx' }
+};
 
 function setStatus(text) { statusEl.textContent = text; }
 function updateDiag() {
   const perf = animeReady && lastAnimeMs ? ` ${Math.round(lastAnimeMs)}ms` : '';
-  diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · AnimeGAN: ${animeState}${perf}`;
+  const fps = animeReady ? ` · AI ${aiFps.toFixed(1)}fps · H ${handFps.toFixed(0)}fps · R ${renderFps.toFixed(0)}fps · ${modelSize}px · skip ${skippedBusy}` : '';
+  diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · AnimeGAN: ${animeState}${perf}${fps}`;
 }
 function showError(text) { errorEl.hidden = !text; errorEl.textContent = text || ''; }
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -116,9 +133,9 @@ async function initHands() {
   } finally { loadingHands = false; }
 }
 
-async function createAnimeSession(executionProviders, label) {
-  animeState = `${label} load…`; updateDiag();
-  const session = await ort.InferenceSession.create('/models/face_paint_512_v2_0.onnx', {
+async function createAnimeSession(executionProviders, label, profile) {
+  animeState = `${label} ${profile.label} load…`; updateDiag();
+  const session = await ort.InferenceSession.create(profile.model, {
     executionProviders,
     graphOptimizationLevel: 'all'
   });
@@ -126,42 +143,62 @@ async function createAnimeSession(executionProviders, label) {
   return session;
 }
 
-async function initAnime() {
-  if (loadingAnime || animeReady) return;
+async function initAnime(force = false) {
+  const requested = effectSelect.value === 'quality' ? 'quality' : 'fast';
+  if (!force && (loadingAnime || (animeReady && selectedProfile === requested))) return;
+  if (loadingAnime) return;
   loadingAnime = true;
-  animeState = 'runtime…'; updateDiag();
+  animeReady = false;
+  animeBusy = false;
+  animeFrameValid = false;
+  animeMapping = null;
+  selectedProfile = requested;
+  const profile = PROFILES[selectedProfile];
+  modelSize = profile.size;
+  modelLayout = profile.layout;
+  animeCanvas.width = animeCanvas.height = modelSize;
+  inputCanvas.width = inputCanvas.height = modelSize;
+  animeState = `${profile.label} runtime…`; updateDiag();
   try {
+    try { await animeSession?.release?.(); } catch {}
+    animeSession = null;
     ort.env.wasm.wasmPaths = '/ort/';
     ort.env.wasm.numThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2));
     ort.env.wasm.simd = true;
 
-    let lastError = null;
     if (navigator.gpu) {
       try {
-        animeSession = await createAnimeSession(['webgpu'], 'WebGPU');
+        animeSession = await createAnimeSession(['webgpu'], 'WebGPU', profile);
       } catch (err) {
-        lastError = err;
         console.warn('AnimeGAN WebGPU failed, switching to WASM', err);
       }
     }
-    if (!animeSession) {
-      animeSession = await createAnimeSession(['wasm'], 'WASM');
-    }
+    if (!animeSession) animeSession = await createAnimeSession(['wasm'], 'WASM', profile);
 
     animeInputName = animeSession.inputNames[0];
     animeOutputName = animeSession.outputNames[0];
     animeReady = true;
-    animeState = `${animeBackend} OK`;
-    animeInterval = animeBackend === 'WebGPU' ? 100 : 300;
+    animeState = `${animeBackend} ${profile.label} OK`;
+    animeInterval = animeBackend === 'WebGPU' ? 0 : (selectedProfile === 'fast' ? 18 : 80);
+    lastAnimeStart = 0;
+    skippedBusy = 0;
     updateDiag();
-
-    // Small warmup is intentionally skipped; first real inference warms the graph while the UI stays responsive.
   } catch (err) {
     console.error(err);
     animeState = 'BŁĄD'; updateDiag();
     showError(`AnimeGAN nie wystartował. Tracking dłoni nadal działa.\n${err?.name || 'Error'}: ${err?.message || err}`);
   } finally { loadingAnime = false; }
 }
+
+effectSelect.addEventListener('change', () => {
+  if (effectSelect.value === 'original') {
+    animeFrameValid = false;
+    animeState = 'wyłączony';
+    updateDiag();
+    return;
+  }
+  initAnime(true);
+});
 
 async function startCamera() {
   if (running) return;
@@ -180,7 +217,7 @@ async function startCamera() {
     startBtn.textContent = 'Kamera działa'; recordBtn.disabled = false;
     resizeCanvas(); requestAnimationFrame(renderLoop);
     setTimeout(initHands, 20);
-    setTimeout(initAnime, 80);
+    setTimeout(() => initAnime(false), 80);
   } catch (err) {
     running = false; cameraState = 'BŁĄD'; updateDiag(); startBtn.disabled = false; startBtn.textContent = 'Spróbuj ponownie';
     setStatus('Nie udało się uruchomić kamery'); showError(readableCameraError(err));
@@ -189,7 +226,7 @@ async function startCamera() {
 
 startBtn.addEventListener('click', startCamera);
 recordBtn.addEventListener('click', toggleRecording);
-setStatus('Gotowy • v9 AnimeGAN'); updateDiag();
+setStatus('Gotowy • v9.1 Performance'); updateDiag();
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -315,43 +352,53 @@ function computeAnimeCrop(q) {
 function preprocessAnimeFrame(q) {
   const crop = computeAnimeCrop(q);
   inputCtx.save();
-  inputCtx.clearRect(0, 0, MODEL_SIZE, MODEL_SIZE);
-  // Mirror at preprocessing time. Anime output is therefore already in the same orientation as the UI.
-  inputCtx.translate(MODEL_SIZE, 0);
+  inputCtx.clearRect(0, 0, modelSize, modelSize);
+  inputCtx.translate(modelSize, 0);
   inputCtx.scale(-1, 1);
-  inputCtx.drawImage(video, crop.sx, crop.sy, crop.side, crop.side, 0, 0, MODEL_SIZE, MODEL_SIZE);
+  inputCtx.drawImage(video, crop.sx, crop.sy, crop.side, crop.side, 0, 0, modelSize, modelSize);
   inputCtx.restore();
-  const rgba = inputCtx.getImageData(0, 0, MODEL_SIZE, MODEL_SIZE).data;
-  const plane = MODEL_SIZE * MODEL_SIZE;
-  const input = new Float32Array(plane * 3);
-  // Model expects NCHW RGB in [-1, 1].
-  for (let i = 0, p = 0; i < plane; i++, p += 4) {
-    input[i] = rgba[p] / 127.5 - 1;
-    input[plane + i] = rgba[p + 1] / 127.5 - 1;
-    input[plane * 2 + i] = rgba[p + 2] / 127.5 - 1;
+  const rgba = inputCtx.getImageData(0, 0, modelSize, modelSize).data;
+  const plane = modelSize * modelSize;
+  let input;
+  let dims;
+  if (modelLayout === 'nhwc') {
+    input = new Float32Array(plane * 3);
+    for (let i = 0, p = 0, o = 0; i < plane; i++, p += 4, o += 3) {
+      input[o] = rgba[p] / 127.5 - 1;
+      input[o + 1] = rgba[p + 1] / 127.5 - 1;
+      input[o + 2] = rgba[p + 2] / 127.5 - 1;
+    }
+    dims = [1, modelSize, modelSize, 3];
+  } else {
+    input = new Float32Array(plane * 3);
+    for (let i = 0, p = 0; i < plane; i++, p += 4) {
+      input[i] = rgba[p] / 127.5 - 1;
+      input[plane + i] = rgba[p + 1] / 127.5 - 1;
+      input[plane * 2 + i] = rgba[p + 2] / 127.5 - 1;
+    }
+    dims = [1, 3, modelSize, modelSize];
   }
-  return { tensor: new ort.Tensor('float32', input, [1, 3, MODEL_SIZE, MODEL_SIZE]), crop };
+  return { tensor: new ort.Tensor('float32', input, dims), crop };
 }
 
 function outputToCanvas(tensor) {
   const data = tensor.data;
   const dims = tensor.dims;
-  const plane = MODEL_SIZE * MODEL_SIZE;
-  const image = animeCtx.createImageData(MODEL_SIZE, MODEL_SIZE);
+  const outH = Number(dims?.[modelLayout === 'nhwc' ? 1 : 2]) || modelSize;
+  const outW = Number(dims?.[modelLayout === 'nhwc' ? 2 : 3]) || modelSize;
+  if (animeCanvas.width !== outW || animeCanvas.height !== outH) {
+    animeCanvas.width = outW; animeCanvas.height = outH;
+  }
+  const plane = outW * outH;
+  const image = animeCtx.createImageData(outW, outH);
   const out = image.data;
-
   const nchw = dims?.length === 4 && dims[1] === 3;
   const nhwc = dims?.length === 4 && dims[3] === 3;
   for (let i = 0, p = 0; i < plane; i++, p += 4) {
     let r, g, b;
-    if (nchw) {
-      r = data[i]; g = data[plane + i]; b = data[plane * 2 + i];
-    } else if (nhwc) {
-      r = data[i * 3]; g = data[i * 3 + 1]; b = data[i * 3 + 2];
-    } else {
-      // Known model is NCHW; this fallback prevents a hard crash if metadata is absent.
-      r = data[i]; g = data[plane + i]; b = data[plane * 2 + i];
-    }
+    if (nhwc) { r = data[i * 3]; g = data[i * 3 + 1]; b = data[i * 3 + 2]; }
+    else if (nchw) { r = data[i]; g = data[plane + i]; b = data[plane * 2 + i]; }
+    else { r = data[i]; g = data[plane + i]; b = data[plane * 2 + i]; }
     out[p] = clamp(Math.round((r * 0.5 + 0.5) * 255), 0, 255);
     out[p + 1] = clamp(Math.round((g * 0.5 + 0.5) * 255), 0, 255);
     out[p + 2] = clamp(Math.round((b * 0.5 + 0.5) * 255), 0, 255);
@@ -361,33 +408,56 @@ function outputToCanvas(tensor) {
   animeFrameValid = true;
 }
 
+function tickAiFps(now) {
+  aiCompleted++;
+  const dt = now - aiWindowStart;
+  if (dt >= 700) { aiFps = aiCompleted * 1000 / dt; aiCompleted = 0; aiWindowStart = now; }
+}
+function tickHandFps(now) {
+  handCompleted++;
+  const dt = now - handWindowStart;
+  if (dt >= 700) { handFps = handCompleted * 1000 / dt; handCompleted = 0; handWindowStart = now; }
+}
+function tickRenderFps(now) {
+  renderCompleted++;
+  const dt = now - renderWindowStart;
+  if (dt >= 700) { renderFps = renderCompleted * 1000 / dt; renderCompleted = 0; renderWindowStart = now; updateDiag(); }
+}
+
 async function runAnimeInference(ts, q) {
-  if (!animeReady || animeBusy || video.readyState < 2 || effectSelect.value !== 'animegan') return;
+  if (!animeReady || video.readyState < 2 || effectSelect.value === 'original') return;
+  const requested = effectSelect.value === 'quality' ? 'quality' : 'fast';
+  if (requested !== selectedProfile) { initAnime(true); return; }
+  if (animeBusy) { skippedBusy++; return; }
   if (ts - lastAnimeStart < animeInterval) return;
-  animeBusy = true; lastAnimeStart = ts;
+
+  // ZERO QUEUE: snapshot the newest available camera frame only when the worker is actually free.
+  animeBusy = true;
+  lastAnimeStart = ts;
   const start = performance.now();
   try {
     const { tensor: inputTensor, crop } = preprocessAnimeFrame(q);
     const results = await animeSession.run({ [animeInputName]: inputTensor });
-    const output = results[animeOutputName];
-    outputToCanvas(output);
+    outputToCanvas(results[animeOutputName]);
     animeMapping = { x: crop.dx, y: crop.dy, size: crop.side };
     lastAnimeDone = performance.now();
     lastAnimeMs = lastAnimeDone - start;
-    // Adaptive cadence: never queue work. Keep a small breathing gap after each inference.
-    animeInterval = clamp(lastAnimeMs * 1.08, animeBackend === 'WebGPU' ? 70 : 220, 900);
-    animeState = `${animeBackend} OK`;
+    tickAiFps(lastAnimeDone);
+    animeState = `${animeBackend} ${PROFILES[selectedProfile].label} OK`;
+    // No post-inference backlog. On WebGPU the next RAF may launch the next newest frame immediately.
+    animeInterval = animeBackend === 'WebGPU' ? 0 : clamp(lastAnimeMs * 0.05, selectedProfile === 'fast' ? 12 : 45, 120);
     updateDiag();
   } catch (err) {
     console.error('AnimeGAN inference failed', err);
-    // Some older models load on WebGPU but fail on a specific kernel at run-time. Retry once on WASM.
     if (animeBackend === 'WebGPU') {
       animeReady = false; animeSession = null; animeBackend = '—'; animeFrameValid = false; animeMapping = null;
       animeState = 'GPU→WASM…'; updateDiag();
       try {
-        animeSession = await createAnimeSession(['wasm'], 'WASM');
+        const profile = PROFILES[selectedProfile];
+        animeSession = await createAnimeSession(['wasm'], 'WASM', profile);
         animeInputName = animeSession.inputNames[0]; animeOutputName = animeSession.outputNames[0];
-        animeBackend = 'WASM'; animeReady = true; animeInterval = 300; animeState = 'WASM OK'; updateDiag();
+        animeBackend = 'WASM'; animeReady = true; animeInterval = selectedProfile === 'fast' ? 20 : 90;
+        animeState = `WASM ${profile.label} OK`; updateDiag();
       } catch (fallbackError) {
         animeState = 'BŁĄD'; updateDiag();
         showError(`AnimeGAN inference nie działa na WebGPU ani WASM.\n${fallbackError?.message || fallbackError}`);
@@ -396,9 +466,7 @@ async function runAnimeInference(ts, q) {
       animeState = 'BŁĄD'; updateDiag();
       showError(`AnimeGAN inference błąd: ${err?.message || err}`);
     }
-  } finally {
-    animeBusy = false;
-  }
+  } finally { animeBusy = false; }
 }
 
 function applyAnimeFx(q) {
@@ -406,8 +474,10 @@ function applyAnimeFx(q) {
   const path = triangleUnionPath(q);
   ctx.save(); ctx.clip(path);
   if (animeFrameValid && animeMapping) {
-    // animeCanvas was mirrored during preprocessing and already uses display-space orientation.
-    ctx.drawImage(animeCanvas, animeMapping.x, animeMapping.y, animeMapping.size, animeMapping.size);
+    // Reproject the latest AI patch into the CURRENT frame position. This removes most visible spatial lag
+    // when hands move while inference is still running.
+    const current = computeAnimeCrop(q);
+    ctx.drawImage(animeCanvas, current.dx, current.dy, current.side, current.side);
   } else {
     // Fast local fallback while the ONNX model is loading / producing its first frame.
     ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
@@ -465,13 +535,14 @@ function toggleRecording() {
 
 async function renderLoop(ts) {
   if (!running) return;
+  tickRenderFps(ts);
   resizeCanvas(); drawVideo();
 
   if (handsReady && handLandmarker && video.readyState >= 2 && ts - lastHandDetect > HAND_INTERVAL) {
     lastHandDetect = ts;
     try {
       const r = handLandmarker.detectForVideo(video, ts);
-      latestHands = r.landmarks || []; latestHandedness = r.handedness || [];
+      latestHands = r.landmarks || []; latestHandedness = r.handedness || []; tickHandFps(ts);
     } catch (e) { console.warn(e); }
   }
 
@@ -485,7 +556,8 @@ async function renderLoop(ts) {
     applyAnimeFx(q); drawFrame(q);
     const age = animeFrameValid ? Math.max(0, performance.now() - lastAnimeDone) : 0;
     const ageText = animeFrameValid ? ` · AI ${Math.round(age)}ms old` : animeReady ? ' · AI pierwsza klatka…' : ' · AI ładowanie…';
-    setStatus(`2/2 dłonie · AnimeGAN${ageText}`);
+    const mode = effectSelect.value === 'quality' ? 'QUALITY' : effectSelect.value === 'fast' ? 'FAST' : 'ORIGINAL';
+    setStatus(`2/2 dłonie · ${mode}${ageText}`);
   } else if (handsReady) {
     const count = Math.min(2, semantic.length);
     setStatus(`${count}/2 dłonie${count === 2 ? ' · rozsuń palce' : ''}`);
