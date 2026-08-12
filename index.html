@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#000000" />
   <meta name="color-scheme" content="dark" />
   <link rel="icon" href="data:," />
-  <title>Magic Frame Free v10 · Anime Live</title>
+  <title>Magic Frame Free v10.1 · Anime Live</title>
 </head>
 <body>
   <main id="app">
@@ -25,8 +25,9 @@
       <button id="startBtn" class="primary">Uruchom kamerę</button>
       <button id="recordBtn" class="secondary" disabled>Nagraj</button>
       <select id="effectSelect" aria-label="Tryb efektu">
-        <option value="live">Anime Live · realtime</option>
-        <option value="live-soft">Anime Live · soft</option>
+        <option value="live">Anime Live · Anime</option>
+        <option value="live-soft">Anime Live · Soft</option>
+        <option value="live-strong">Anime Live · Strong Anime</option>
         <option value="ai-shinkai">AI Quality · Shinkai</option>
         <option value="ai-paprika">AI Quality · Paprika</option>
         <option value="original">Oryginał w ramce</option>
@@ -35,7 +36,7 @@
     </section>
 
     <section class="help">
-      <p><strong>v10:</strong> domyślny Anime Live działa lokalnie w WebGL2 — bez GAN-a w krytycznej ścieżce. Tracking i freeform/self-crossing quad pozostają realtime.</p>
+      <p><strong>v10.1:</strong> Anime Live ma trzy poziomy intensywności. Renderer łączy face-aware warp, cel shading, kontury i line-art twarzy — bez GAN-a w krytycznej ścieżce.</p>
       <p>AI Quality nadal jest dostępne jako opcja. Modele i WASM są cache’owane lokalnie po pierwszym użyciu.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>

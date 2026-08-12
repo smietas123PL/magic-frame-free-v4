@@ -1,9 +1,12 @@
-# Magic Frame Free v10 — Anime Live
+# Magic Frame Free v10.1 — Anime Live
 
-Domyślny tryb `Anime Live` nie używa GAN-a. Efekt wykonywany jest w WebGL2 lokalnie na GPU: smoothing, posterization, edge ink, grading i face-aware warp. CartoonGAN Light pozostaje jako opcjonalny tryb `AI Quality`.
+Realtime freeform/self-crossing hand frame with MediaPipe Hands + Face Landmarker.
 
-- MediaPipe Hands: freeform/self-crossing quad
-- MediaPipe Face Landmarker: lekkie face-aware warp dla Live Anime
-- WebGL2: realtime anime renderer
-- CartoonGAN TFJS Worker: opcjonalny quality mode
-- Runtime Cache Storage: modele/WASM po pierwszym użyciu zostają lokalnie w przeglądarce
+## Anime Live modes
+- Soft — subtle smoothing and ink
+- Anime — default cel-shaded anime look
+- Strong Anime — larger eyes, narrower jaw, stronger ink and palette reduction
+
+The realtime modes run locally in WebGL2. Optional CartoonGAN quality modes remain available but are not used in the realtime path.
+
+Build: `npm install && npm run build`

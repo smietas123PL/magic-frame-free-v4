@@ -29,7 +29,7 @@ let handCompleted=0, handWindowStart=performance.now(), handFps=0;
 let renderCompleted=0, renderWindowStart=performance.now(), renderFps=0;
 let mediaRecorder=null, recordedChunks=[], recordingStartedAt=0;
 
-const HAND_INTERVAL=1000/30, FACE_INTERVAL=1000/15, FRAME_HOLD_MS=90;
+const HAND_INTERVAL=1000/30, FACE_INTERVAL=1000/20, FRAME_HOLD_MS=90;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const lerp=(a,b,t)=>a+(b-a)*t;
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
@@ -137,11 +137,12 @@ function faceUniforms(){
   const m=i=>mirrorPoint(f[i]);
   const eyeL={x:(m(33).x+m(133).x)*.5,y:(m(33).y+m(133).y)*.5};
   const eyeR={x:(m(362).x+m(263).x)*.5,y:(m(362).y+m(263).y)*.5};
-  const cheekL=m(234),cheekR=m(454),nose=m(1),jaw=m(152);
-  return{eyeL,eyeR,center:nose,jaw,width:Math.max(.08,dist(cheekL,cheekR))};
+  const cheekL=m(234),cheekR=m(454),nose=m(1),jaw=m(152),forehead=m(10);
+  const mouth={x:(m(13).x+m(14).x)*.5,y:(m(13).y+m(14).y)*.5};
+  return{eyeL,eyeR,center:nose,jaw,forehead,mouth,width:Math.max(.08,dist(cheekL,cheekR)),height:Math.max(.1,dist(forehead,jaw))};
 }
 
-// ---------- realtime WebGL2 anime ----------
+// ---------- realtime WebGL2 anime v10.1 ----------
 let gl=null,program=null,tex=null,vao=null;
 let u={};
 function shader(gl,type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
@@ -150,26 +151,75 @@ function initLiveFx(){
     gl=fxCanvas.getContext('webgl2',{alpha:false,antialias:false,preserveDrawingBuffer:false,powerPreference:'high-performance'});if(!gl)throw new Error('WebGL2 niedostępny');
     const vs=`#version 300 es\nprecision highp float;out vec2 vUv;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);vUv=p;gl_Position=vec4(p*2.0-1.0,0,1);}`;
     const fs=`#version 300 es
-precision highp float;in vec2 vUv;out vec4 outColor;uniform sampler2D t;uniform vec2 res;uniform int mode;uniform int hasFace;uniform vec2 eyeL;uniform vec2 eyeR;uniform vec2 faceC;uniform vec2 jaw;uniform float faceW;
-vec2 magnify(vec2 uv,vec2 c,float r,float k){vec2 d=uv-c;float x=length(d)/r;if(x<1.0){float s=mix(1.0-k,1.0,smoothstep(0.0,1.0,x));uv=c+d*s;}return uv;}
-vec2 warpFace(vec2 uv){if(hasFace==0)return uv;uv=magnify(uv,eyeL,faceW*.18,.18);uv=magnify(uv,eyeR,faceW*.18,.18);float y0=faceC.y+faceW*.05;float y1=jaw.y+faceW*.08;if(uv.y>y0&&uv.y<y1){float t0=smoothstep(y0,y1,uv.y);uv.x=faceC.x+(uv.x-faceC.x)*(1.0+.12*t0);}return uv;}
+precision highp float;
+in vec2 vUv;out vec4 outColor;
+uniform sampler2D t;uniform vec2 res;uniform int mode;uniform int hasFace;
+uniform vec2 eyeL;uniform vec2 eyeR;uniform vec2 faceC;uniform vec2 jaw;uniform vec2 forehead;uniform float faceW;uniform float faceH;
 float lum(vec3 c){return dot(c,vec3(.299,.587,.114));}
-void main(){vec2 uv=vec2(1.0-vUv.x,vUv.y);uv=warpFace(uv);vec2 px=1.0/res;vec3 c=texture(t,uv).rgb;vec3 b=(c*4.0+texture(t,uv+vec2(px.x,0)).rgb+texture(t,uv-vec2(px.x,0)).rgb+texture(t,uv+vec2(0,px.y)).rgb+texture(t,uv-vec2(0,px.y)).rgb)/8.0;float l=lum(c);float gx=lum(texture(t,uv+vec2(px.x,0)).rgb)-lum(texture(t,uv-vec2(px.x,0)).rgb);float gy=lum(texture(t,uv+vec2(0,px.y)).rgb)-lum(texture(t,uv-vec2(0,px.y)).rgb);float edge=smoothstep(.055,.16,length(vec2(gx,gy)));float levels=mode==2?8.0:6.0;vec3 q=floor(b*levels+.5)/levels;q=pow(q,vec3(.92));q=mix(vec3(l),q,1.18);q.r*=1.035;q.b*=1.025;float ink=mode==2?.42:.62;q*=1.0-edge*ink;q=mix(q,vec3(.08,.07,.09),edge*(mode==2?.18:.34));outColor=vec4(clamp(q,0.0,1.0),1.0);}`;
+float satv(vec3 c){float ma=max(c.r,max(c.g,c.b)),mi=min(c.r,min(c.g,c.b));return ma-mi;}
+vec2 magnify(vec2 uv,vec2 c,float r,float k){vec2 d=uv-c;float x=length(d)/max(r,.0001);if(x<1.0){float s=mix(1.0-k,1.0,smoothstep(0.0,1.0,x));uv=c+d*s;}return uv;}
+vec2 warpFace(vec2 uv){
+  if(hasFace==0)return uv;
+  float eyeK=mode==1?.10:(mode==2?.21:.29);
+  float jawK=mode==1?.05:(mode==2?.14:.21);
+  uv=magnify(uv,eyeL,faceW*.19,eyeK);uv=magnify(uv,eyeR,faceW*.19,eyeK);
+  float y0=faceC.y+faceH*.02;float y1=jaw.y+faceH*.05;
+  if(uv.y>y0&&uv.y<y1){float tt=smoothstep(y0,y1,uv.y);uv.x=faceC.x+(uv.x-faceC.x)*(1.0+jawK*tt);}
+  return uv;
+}
+float faceMask(vec2 uv){if(hasFace==0)return 0.0;vec2 d=vec2((uv.x-faceC.x)/(faceW*.58),(uv.y-(faceC.y+faceH*.05))/(faceH*.60));return 1.0-smoothstep(.72,1.05,length(d));}
+vec3 sampleSmooth(vec2 uv,vec2 px,float amount){
+  vec3 c=texture(t,uv).rgb;
+  vec3 n=texture(t,uv+vec2(px.x,0)).rgb+texture(t,uv-vec2(px.x,0)).rgb+texture(t,uv+vec2(0,px.y)).rgb+texture(t,uv-vec2(0,px.y)).rgb;
+  vec3 d=texture(t,uv+px).rgb+texture(t,uv-px).rgb+texture(t,uv+vec2(px.x,-px.y)).rgb+texture(t,uv+vec2(-px.x,px.y)).rgb;
+  vec3 b=(c*4.0+n*1.35+d*.55)/11.6;return mix(c,b,amount);
+}
+vec3 celColor(vec3 c,float levels,float strength){
+  float l=max(lum(c),.001);float q=floor(l*levels+.5)/levels;vec3 hue=c/l;vec3 outc=hue*q;
+  outc=mix(c,outc,strength);outc=pow(max(outc,0.0),vec3(.92));
+  outc.r*=1.045;outc.b*=1.025;return outc;
+}
+void main(){
+  vec2 uv=vec2(1.0-vUv.x,vUv.y);uv=warpFace(uv);vec2 px=1.0/res;
+  float fm=faceMask(uv);float smoothAmt=mode==1?.34:(mode==2?.62:.76);vec3 c=sampleSmooth(uv,px,mix(.18,smoothAmt,fm));
+  float lL=lum(texture(t,uv-vec2(px.x,0)).rgb),lR=lum(texture(t,uv+vec2(px.x,0)).rgb),lU=lum(texture(t,uv-vec2(0,px.y)).rgb),lD=lum(texture(t,uv+vec2(0,px.y)).rgb);
+  float gx=lR-lL,gy=lD-lU;float edgeLen=length(vec2(gx,gy));float edge=smoothstep(mode==1?.085:(mode==2?.060:.047),mode==1?.19:(mode==2?.145:.115),edgeLen);
+  float levels=mode==1?8.0:(mode==2?5.0:4.0);float cel=mode==1?.48:(mode==2?.78:.90);vec3 q=celColor(c,levels,cel);
+  float L=lum(q);float shadowStep=mode==1?.34:(mode==2?.42:.48);float shadow=smoothstep(.52,.20,L)*shadowStep;q*=1.0-shadow;
+  float hair=(1.0-smoothstep(.16,.50,lum(c)))*smoothstep(.05,.25,satv(c)+.05)*(1.0-smoothstep(faceC.y-faceH*.02,faceC.y+faceH*.42,uv.y));
+  q=mix(q,q*vec3(.62,.64,.76),hair*(mode==1?.16:.30));
+  vec3 ink=vec3(.075,.055,.085);float inkAmt=mode==1?.32:(mode==2?.63:.78);q=mix(q,ink,edge*inkAmt);
+  outColor=vec4(clamp(q,0.0,1.0),1.0);
+}`;
     program=gl.createProgram();gl.attachShader(program,shader(gl,gl.VERTEX_SHADER,vs));gl.attachShader(program,shader(gl,gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));
     tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-    vao=gl.createVertexArray();u.res=gl.getUniformLocation(program,'res');u.mode=gl.getUniformLocation(program,'mode');u.hasFace=gl.getUniformLocation(program,'hasFace');u.eyeL=gl.getUniformLocation(program,'eyeL');u.eyeR=gl.getUniformLocation(program,'eyeR');u.faceC=gl.getUniformLocation(program,'faceC');u.jaw=gl.getUniformLocation(program,'jaw');u.faceW=gl.getUniformLocation(program,'faceW');fxState='WebGL2 Live OK';
+    vao=gl.createVertexArray();
+    for(const name of ['res','mode','hasFace','eyeL','eyeR','faceC','jaw','forehead','faceW','faceH'])u[name]=gl.getUniformLocation(program,name);
+    fxState='WebGL2 Anime v10.1 OK';
   }catch(e){gl=null;fxState='Canvas fallback';console.warn(e);}updateDiag();
 }
-function resizeFx(w,h){
-  // half-res is enough for live anime and keeps 30-60 FPS on modest GPUs
-  const scale=Math.min(1,960/w);fxCanvas.width=Math.max(2,Math.round(w*scale));fxCanvas.height=Math.max(2,Math.round(h*scale));
-}
+function resizeFx(w,h){const scale=Math.min(1,960/w);fxCanvas.width=Math.max(2,Math.round(w*scale));fxCanvas.height=Math.max(2,Math.round(h*scale));}
+function liveModeNumber(mode){return mode==='live-soft'?1:mode==='live-strong'?3:2;}
 function renderLiveFx(mode){
-  if(!gl){const c=fxCanvas.getContext('2d');c.save();c.translate(fxCanvas.width,0);c.scale(-1,1);c.filter=mode==='live-soft'?'saturate(1.15) contrast(1.08)':'saturate(1.3) contrast(1.2)';c.drawImage(video,0,0,fxCanvas.width,fxCanvas.height);c.restore();return;}
-  gl.viewport(0,0,fxCanvas.width,fxCanvas.height);gl.useProgram(program);gl.bindVertexArray(vao);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,video);gl.uniform2f(u.res,fxCanvas.width,fxCanvas.height);gl.uniform1i(u.mode,mode==='live-soft'?2:1);
-  const f=faceUniforms();gl.uniform1i(u.hasFace,f?1:0);if(f){gl.uniform2f(u.eyeL,f.eyeL.x,1-f.eyeL.y);gl.uniform2f(u.eyeR,f.eyeR.x,1-f.eyeR.y);gl.uniform2f(u.faceC,f.center.x,1-f.center.y);gl.uniform2f(u.jaw,f.jaw.x,1-f.jaw.y);gl.uniform1f(u.faceW,f.width);}gl.drawArrays(gl.TRIANGLES,0,3);
+  const mn=liveModeNumber(mode);
+  if(!gl){const c=fxCanvas.getContext('2d');c.save();c.translate(fxCanvas.width,0);c.scale(-1,1);c.filter=mn===1?'saturate(1.12) contrast(1.08)':mn===3?'saturate(1.45) contrast(1.30)':'saturate(1.32) contrast(1.20)';c.drawImage(video,0,0,fxCanvas.width,fxCanvas.height);c.restore();return;}
+  gl.viewport(0,0,fxCanvas.width,fxCanvas.height);gl.useProgram(program);gl.bindVertexArray(vao);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,video);gl.uniform2f(u.res,fxCanvas.width,fxCanvas.height);gl.uniform1i(u.mode,mn);
+  const f=faceUniforms();gl.uniform1i(u.hasFace,f?1:0);if(f){gl.uniform2f(u.eyeL,f.eyeL.x,1-f.eyeL.y);gl.uniform2f(u.eyeR,f.eyeR.x,1-f.eyeR.y);gl.uniform2f(u.faceC,f.center.x,1-f.center.y);gl.uniform2f(u.jaw,f.jaw.x,1-f.jaw.y);gl.uniform2f(u.forehead,f.forehead.x,1-f.forehead.y);gl.uniform1f(u.faceW,f.width);gl.uniform1f(u.faceH,f.height);}gl.drawArrays(gl.TRIANGLES,0,3);
 }
-function applyLiveFx(q,mode){renderLiveFx(mode);ctx.save();ctx.clip(triangleUnionPath(q));ctx.drawImage(fxCanvas,0,0,canvas.width,canvas.height);ctx.restore();}
+function drawAnimeLineArt(q,mode){
+  const f=latestFace;if(!f||f.length<455||mode==='live-soft')return;
+  const p=i=>{const m=mirrorPoint(f[i]);return{x:m.x*canvas.width,y:m.y*canvas.height}};
+  const paths=[
+    [33,160,158,133,153,144,163,7,33],[362,385,387,263,373,380,390,249,362],
+    [70,63,105,66,107],[336,296,334,293,300],[61,146,91,181,84,17,314,405,321,375,291],
+    [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10]
+  ];
+  const strength=mode==='live-strong'?1:.78;ctx.save();ctx.clip(triangleUnionPath(q));ctx.strokeStyle=`rgba(45,28,50,${.62*strength})`;ctx.lineWidth=Math.max(1.2,canvas.width*(mode==='live-strong'?.0022:.00165));ctx.lineCap='round';ctx.lineJoin='round';
+  for(const ids of paths){ctx.beginPath();const a=p(ids[0]);ctx.moveTo(a.x,a.y);for(let i=1;i<ids.length;i++){const b=p(ids[i]);ctx.lineTo(b.x,b.y);}ctx.stroke();}
+  const fu=faceUniforms();if(fu){for(const e of [fu.eyeL,fu.eyeR]){ctx.fillStyle=`rgba(255,255,255,${.72*strength})`;ctx.beginPath();ctx.arc(e.x*canvas.width,e.y*canvas.height,Math.max(1.8,canvas.width*.0032),0,Math.PI*2);ctx.fill();}}
+  ctx.restore();
+}
+function applyLiveFx(q,mode){renderLiveFx(mode);ctx.save();ctx.clip(triangleUnionPath(q));ctx.drawImage(fxCanvas,0,0,canvas.width,canvas.height);ctx.restore();drawAnimeLineArt(q,mode);}
 
 // ---------- optional CartoonGAN quality worker ----------
 let cartoonWorker=null,cartoonReady=false,cartoonBusy=false,cartoonState='wyłączony',cartoonStyle='shinkai',lastCartoonMs=0,lastCartoonDone=0,cartoonCompleted=0,cartoonWindowStart=performance.now(),cartoonFps=0,aiRequestId=0,latestQuadForAi=null;
@@ -189,7 +239,7 @@ effectSelect.addEventListener('change',()=>{if(isAiMode())initCartoon();else sto
 
 // ---------- recording/debug ----------
 function preferredMime(){return['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>MediaRecorder?.isTypeSupported?.(t))||'';}
-function toggleRecording(){if(!running||!MediaRecorder||!canvas.captureStream){showError('Nagrywanie niedostępne.');return;}if(mediaRecorder?.state==='recording'){mediaRecorder.stop();return;}recordedChunks=[];const mime=preferredMime(),s=canvas.captureStream(30);mediaRecorder=new MediaRecorder(s,mime?{mimeType:mime,videoBitsPerSecond:8_000_000}:{videoBitsPerSecond:8_000_000});mediaRecorder.ondataavailable=e=>{if(e.data?.size)recordedChunks.push(e.data)};mediaRecorder.onstop=()=>{const type=mediaRecorder.mimeType||mime||'video/webm',blob=new Blob(recordedChunks,{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`magic-frame-v10-${Date.now()}.${type.includes('mp4')?'mp4':'webm'}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);recordBtn.textContent='Nagraj';recBadge.hidden=true;};mediaRecorder.start(250);recordingStartedAt=performance.now();recordBtn.textContent='Stop';recBadge.hidden=false;}
+function toggleRecording(){if(!running||!MediaRecorder||!canvas.captureStream){showError('Nagrywanie niedostępne.');return;}if(mediaRecorder?.state==='recording'){mediaRecorder.stop();return;}recordedChunks=[];const mime=preferredMime(),s=canvas.captureStream(30);mediaRecorder=new MediaRecorder(s,mime?{mimeType:mime,videoBitsPerSecond:8_000_000}:{videoBitsPerSecond:8_000_000});mediaRecorder.ondataavailable=e=>{if(e.data?.size)recordedChunks.push(e.data)};mediaRecorder.onstop=()=>{const type=mediaRecorder.mimeType||mime||'video/webm',blob=new Blob(recordedChunks,{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`magic-frame-v10-1-${Date.now()}.${type.includes('mp4')?'mp4':'webm'}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);recordBtn.textContent='Nagraj';recBadge.hidden=true;};mediaRecorder.start(250);recordingStartedAt=performance.now();recordBtn.textContent='Stop';recBadge.hidden=false;}
 function drawDebug(s,q,raw){if(!debugToggle.checked)return;ctx.save();ctx.fillStyle='#00ffb4';for(const h of s)for(const p of h.pts){ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,2.5,0,Math.PI*2);ctx.fill();}if(raw){const t=raw.map(p=>({x:p.x*canvas.width,y:p.y*canvas.height}));ctx.setLineDash([6,6]);ctx.strokeStyle='#00ffff';ctx.beginPath();ctx.moveTo(t[0].x,t[0].y);for(let i=1;i<4;i++)ctx.lineTo(t[i].x,t[i].y);ctx.closePath();ctx.stroke();}ctx.restore();}
 function tickHand(now){handCompleted++;const dt=now-handWindowStart;if(dt>=700){handFps=handCompleted*1000/dt;handCompleted=0;handWindowStart=now;}}
 function tickRender(now){renderCompleted++;const dt=now-renderWindowStart;if(dt>=700){renderFps=renderCompleted*1000/dt;renderCompleted=0;renderWindowStart=now;updateDiag();}}
@@ -200,12 +250,12 @@ async function renderLoop(ts){
   if(faceReady&&video.readyState>=2&&ts-lastFaceDetect>FACE_INTERVAL){lastFaceDetect=ts;try{latestFace=faceLandmarker.detectForVideo(video,ts).faceLandmarks?.[0]||null;}catch{}}
   const semantic=semanticHands(latestHands,latestHandedness),raw=measureFreeformQuad(semantic),q=smoothQuad(raw,ts),mode=effectSelect.value;
   if(q){
-    if(mode==='live'||mode==='live-soft')applyLiveFx(q,mode);
+    if(mode==='live'||mode==='live-soft'||mode==='live-strong')applyLiveFx(q,mode);
     else if(isAiMode()){latestQuadForAi=q.map(p=>({...p}));kickAi();applyAi(q);}
-    drawFrame(q);const extra=isAiMode()&&lastCartoonDone?` · AI ${Math.round(performance.now()-lastCartoonDone)}ms old`:'';setStatus(`2/2 dłonie · ${mode==='live'?'ANIME LIVE':mode==='live-soft'?'ANIME SOFT':mode==='original'?'ORIGINAL':'AI QUALITY'}${extra}`);
+    drawFrame(q);const extra=isAiMode()&&lastCartoonDone?` · AI ${Math.round(performance.now()-lastCartoonDone)}ms old`:'';setStatus(`2/2 dłonie · ${mode==='live'?'ANIME':mode==='live-soft'?'ANIME SOFT':mode==='live-strong'?'STRONG ANIME':mode==='original'?'ORIGINAL':'AI QUALITY'}${extra}`);
   }else{latestQuadForAi=null;if(handsReady)setStatus(`${Math.min(2,semantic.length)}/2 dłonie`);}
   if(mediaRecorder?.state==='recording')recBadge.textContent=`● REC ${Math.floor((ts-recordingStartedAt)/1000)}s`;
   drawDebug(semantic,q,raw);requestAnimationFrame(renderLoop);
 }
 
-setStatus('Gotowy • v10 Anime Live');
+setStatus('Gotowy • v10.1 Anime Live');
