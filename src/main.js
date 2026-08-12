@@ -27,14 +27,16 @@ let latestFace = null;
 let virtualFrame = null;
 let lastValidFrameAt = 0;
 let frameCounter = 0;
+let previousMeasurement = null;
+let previousMeasurementAt = 0;
 let cameraState = '—';
 let handState = '—';
 let faceState = '—';
 let fxState = 'init…';
 
-const HAND_INTERVAL = 1000 / 24;
+const HAND_INTERVAL = 1000 / 30;
 const FACE_INTERVAL = 1000 / 18;
-const FRAME_HOLD_MS = 700;
+const FRAME_HOLD_MS = 120;
 
 function setStatus(text) { statusEl.textContent = text; }
 function updateDiag() { diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · twarz: ${faceState} · FX: ${fxState}`; }
@@ -51,7 +53,7 @@ function readableCameraError(err) {
 async function requestCamera() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Wymagany jest HTTPS lub localhost.');
   const attempts = [
-    { video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false },
+    { video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, max: 60 } }, audio: false },
     { video: { facingMode: 'user' }, audio: false },
     { video: true, audio: false }
   ];
@@ -137,7 +139,7 @@ async function startCamera() {
 }
 
 startBtn.addEventListener('click', startCamera);
-setStatus('Gotowy • v7'); updateDiag();
+setStatus('Gotowy • v7.1 low-latency'); updateDiag();
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -184,27 +186,52 @@ function measureVirtualFrame(sorted) {
 function smoothVirtualFrame(next, now) {
   if (next) {
     lastValidFrameAt = now;
+
+    // v7.1 low-latency: niewielka predykcja kompensuje 1 klatkę opóźnienia detektora.
+    let target = JSON.parse(JSON.stringify(next));
+    if (previousMeasurement && previousMeasurementAt > 0) {
+      const dt = Math.max(1, now - previousMeasurementAt);
+      const predictionMs = Math.min(18, dt * 0.45);
+      const k = predictionMs / dt;
+      target.center.x = clamp(next.center.x + (next.center.x - previousMeasurement.center.x) * k, 0, 1);
+      target.center.y = clamp(next.center.y + (next.center.y - previousMeasurement.center.y) * k, 0, 1);
+      target.angle = next.angle + ((((next.angle - previousMeasurement.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * k);
+    }
+    previousMeasurement = JSON.parse(JSON.stringify(next));
+    previousMeasurementAt = now;
+
     if (!virtualFrame) {
-      virtualFrame = JSON.parse(JSON.stringify(next));
+      virtualFrame = target;
       return virtualFrame;
     }
-    const centerJump = dist(virtualFrame.center,next.center);
-    const alphaPos = centerJump > .16 ? .34 : .18;
-    const alphaSize = .14;
-    const alphaAngle = .16;
-    virtualFrame.center.x = lerp(virtualFrame.center.x,next.center.x,alphaPos);
-    virtualFrame.center.y = lerp(virtualFrame.center.y,next.center.y,alphaPos);
-    virtualFrame.width = lerp(virtualFrame.width,next.width,alphaSize);
-    virtualFrame.height = lerp(virtualFrame.height,next.height,alphaSize);
-    virtualFrame.angle = angleLerp(virtualFrame.angle,next.angle,alphaAngle);
-    virtualFrame.lGrip.x = lerp(virtualFrame.lGrip.x,next.lGrip.x,.28);
-    virtualFrame.lGrip.y = lerp(virtualFrame.lGrip.y,next.lGrip.y,.28);
-    virtualFrame.rGrip.x = lerp(virtualFrame.rGrip.x,next.rGrip.x,.28);
-    virtualFrame.rGrip.y = lerp(virtualFrame.rGrip.y,next.rGrip.y,.28);
+
+    const centerJump = dist(virtualFrame.center, target.center);
+    const speedAlpha = clamp(0.72 + centerJump * 1.8, 0.72, 0.96);
+    const widthDelta = Math.abs(target.width - virtualFrame.width);
+    const heightDelta = Math.abs(target.height - virtualFrame.height);
+
+    // Pozycja i kąt mają reagować prawie natychmiast.
+    virtualFrame.center.x = lerp(virtualFrame.center.x, target.center.x, speedAlpha);
+    virtualFrame.center.y = lerp(virtualFrame.center.y, target.center.y, speedAlpha);
+    virtualFrame.angle = angleLerp(virtualFrame.angle, target.angle, 0.88);
+
+    // Minimalna dead-zone ogranicza tylko mikro-jitter, bez efektu "gumowej" ramki.
+    if (widthDelta > 0.0045) virtualFrame.width = lerp(virtualFrame.width, target.width, 0.68);
+    if (heightDelta > 0.0045) virtualFrame.height = lerp(virtualFrame.height, target.height, 0.68);
+
+    virtualFrame.lGrip.x = lerp(virtualFrame.lGrip.x, target.lGrip.x, 0.90);
+    virtualFrame.lGrip.y = lerp(virtualFrame.lGrip.y, target.lGrip.y, 0.90);
+    virtualFrame.rGrip.x = lerp(virtualFrame.rGrip.x, target.rGrip.x, 0.90);
+    virtualFrame.rGrip.y = lerp(virtualFrame.rGrip.y, target.rGrip.y, 0.90);
     return virtualFrame;
   }
-  if (virtualFrame && now-lastValidFrameAt <= FRAME_HOLD_MS) return virtualFrame;
-  virtualFrame = null; return null;
+
+  // Tylko krótki dropout guard; brak długiego "bufora".
+  if (virtualFrame && now - lastValidFrameAt <= FRAME_HOLD_MS) return virtualFrame;
+  virtualFrame = null;
+  previousMeasurement = null;
+  previousMeasurementAt = 0;
+  return null;
 }
 
 function frameToQuad(f) {
@@ -314,9 +341,10 @@ function drawFaceEnhancement(q,effect){
 }
 function drawGlitch(cq){if(frameCounter%3!==0)return;let minX=Math.min(...cq.map(p=>p.x)),maxX=Math.max(...cq.map(p=>p.x)),minY=Math.min(...cq.map(p=>p.y)),maxY=Math.max(...cq.map(p=>p.y));ctx.save();pathQuad(cq);ctx.clip();for(let i=0;i<5;i++){const h=Math.max(2,Math.random()*(maxY-minY)*.03),y=minY+Math.random()*Math.max(1,maxY-minY-h),off=(Math.random()-.5)*16;try{const img=ctx.getImageData(minX,y,maxX-minX,h);ctx.putImageData(img,minX+off,y)}catch{}}ctx.restore();}
 function drawFrame(q){const cq=canvasQuad(q);ctx.save();pathQuad(cq);ctx.lineWidth=Math.max(3,canvas.width*.004);ctx.strokeStyle='rgba(255,255,255,.98)';ctx.shadowBlur=16;ctx.shadowColor='rgba(255,255,255,.55)';ctx.stroke();ctx.restore();}
-function drawDebug(sorted,f,q){
+function drawDebug(sorted,f,q,rawMeasured){
   if(!debugToggle.checked)return;ctx.save();ctx.fillStyle='rgba(0,255,180,.9)';for(const h of sorted)for(const p of h.pts){ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,2.6,0,Math.PI*2);ctx.fill();}
   if(f){ctx.fillStyle='#ff3bd4';for(const p of [f.lGrip,f.rGrip]){ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,8,0,Math.PI*2);ctx.fill();}ctx.strokeStyle='rgba(255,59,212,.8)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(f.lGrip.x*canvas.width,f.lGrip.y*canvas.height);ctx.lineTo(f.rGrip.x*canvas.width,f.rGrip.y*canvas.height);ctx.stroke();}
+  if(rawMeasured){const rq=canvasQuad(frameToQuad(rawMeasured));ctx.save();ctx.setLineDash([7,7]);ctx.strokeStyle='rgba(0,255,255,.95)';ctx.lineWidth=2;pathQuad(rq);ctx.stroke();ctx.restore();}
   if(latestFace){const pts=latestFace.map(mirrorPoint);ctx.fillStyle='rgba(255,220,0,.58)';for(let i=0;i<pts.length;i+=8){const p=pts[i];ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,1.5,0,Math.PI*2);ctx.fill();}ctx.fillStyle='rgba(255,220,0,.08)';ctx.beginPath();FACE_OVAL.forEach((i,k)=>{const p=pts[i];if(!p)return;k?ctx.lineTo(p.x*canvas.width,p.y*canvas.height):ctx.moveTo(p.x*canvas.width,p.y*canvas.height)});ctx.closePath();ctx.fill();}
   if(q){const cq=canvasQuad(q);ctx.strokeStyle='rgba(80,180,255,.9)';ctx.lineWidth=2;pathQuad(cq);ctx.stroke();}ctx.restore();
 }
@@ -328,5 +356,5 @@ async function renderLoop(ts){
   const sorted=sortHands(latestHands,latestHandedness);const measured=measureVirtualFrame(sorted);const vf=smoothVirtualFrame(measured,ts);const q=vf?frameToQuad(vf):null;
   if(q){applyFx(q,effectSelect.value);drawFaceEnhancement(q,effectSelect.value);drawFrame(q);setStatus(`2/2 dłonie · Virtual Frame · ${effectSelect.options[effectSelect.selectedIndex].text}`);}
   else if(handsReady){const count=Math.min(2,sorted.length);setStatus(`${count}/2 dłonie${count===2?' · rozsuń dłonie':''}`);}
-  drawDebug(sorted,vf,q);requestAnimationFrame(renderLoop);
+  drawDebug(sorted,vf,q,measured);requestAnimationFrame(renderLoop);
 }
