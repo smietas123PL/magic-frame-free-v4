@@ -186,7 +186,7 @@ vec3 simplify(vec2 uv,vec2 px,float fm,float sm){
   vec3 src=texture(t,uv).rgb;vec3 b1=blur9(uv,px,1.35);vec3 b2=blur9(uv,px,2.7);
   float preserve=smoothstep(.035,.14,abs(lum(src)-lum(b2)));
   float base=mode==1?.46:(mode==2?.70:.82);float faceExtra=fm*sm*(mode==1?.20:.32);
-  vec3 smooth=mix(b1,b2,.48);return mix(src,smooth,clamp(base+faceExtra-preserve*.16,0.0,.94));
+  vec3 smoothColor=mix(b1,b2,.48);return mix(src,smoothColor,clamp(base+faceExtra-preserve*.16,0.0,.94));
 }
 vec3 palette(vec3 c,float fm,float sm){
   float levels=mode==1?7.0:(mode==2?5.0:4.0);float l=max(lum(c),.004);
