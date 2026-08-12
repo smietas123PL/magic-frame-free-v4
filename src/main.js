@@ -1,7 +1,5 @@
 import './styles.css';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
-import * as tf from '@tensorflow/tfjs';
-import '@tensorflow/tfjs-backend-webgpu';
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -18,6 +16,9 @@ const statusEl = document.getElementById('status');
 const errorEl = document.getElementById('errorDetails');
 const diagEl = document.getElementById('diag');
 const recBadge = document.getElementById('recBadge');
+
+let tf = null;
+let tfModulesLoading = false;
 
 let handLandmarker = null;
 let stream = null;
@@ -59,20 +60,57 @@ function readableCameraError(err) {
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') return 'Brak zgody na kamerę. Kliknij ikonę kamery przy adresie → Zezwalaj, potem odśwież.';
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'Nie znaleziono kamery.';
   if (name === 'NotReadableError' || name === 'TrackStartError') return 'Kamera jest zajęta przez inną aplikację.';
+  if (/timeout/i.test(err?.message || '')) return 'Przeglądarka nie odpowiedziała na prośbę o kamerę w 10 s. Sprawdź ikonę kłódki przy adresie → Kamera → Zezwalaj, zamknij inne aplikacje używające kamery i odśwież stronę.';
   return `${name}: ${err?.message || 'Nieznany błąd kamery'}`;
+}
+
+async function cameraPermissionState() {
+  try {
+    if (!navigator.permissions?.query) return 'unknown';
+    const p = await navigator.permissions.query({ name: 'camera' });
+    return p?.state || 'unknown';
+  } catch { return 'unknown'; }
+}
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timeout po ${Math.round(ms/1000)} s`)), ms);
+    })
+  ]);
 }
 
 async function requestCamera() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Wymagany jest HTTPS lub localhost.');
+
+  const permission = await cameraPermissionState();
+  cameraState = `permission:${permission}`; updateDiag();
+  if (permission === 'denied') {
+    const e = new Error('Dostęp do kamery jest zablokowany dla tej domeny. Kliknij ikonę kłódki przy adresie → Uprawnienia witryny → Kamera → Zezwalaj.');
+    e.name = 'NotAllowedError';
+    throw e;
+  }
+
+  // Najpierw prosimy o najprostszy stream. To najszybciej wywołuje prompt
+  // uprawnień w Edge/Chrome. Dopiero kolejne wersje mogą stosować ostrzejsze constraints.
   const attempts = [
-    { video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, max: 60 } }, audio: false },
-    { video: { facingMode: 'user' }, audio: false },
-    { video: true, audio: false }
+    { video: true, audio: false },
+    { video: { facingMode: { ideal: 'user' } }, audio: false },
+    { video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 60 } }, audio: false }
   ];
+
   let lastError;
-  for (const constraints of attempts) {
-    try { return await navigator.mediaDevices.getUserMedia(constraints); }
-    catch (err) { lastError = err; if (err?.name === 'NotAllowedError') break; }
+  for (let i = 0; i < attempts.length; i++) {
+    cameraState = `request ${i+1}/${attempts.length}`; updateDiag();
+    try {
+      return await withTimeout(navigator.mediaDevices.getUserMedia(attempts[i]), 10000, 'getUserMedia');
+    } catch (err) {
+      lastError = err;
+      console.warn('camera attempt failed', i + 1, err);
+      if (err?.name === 'NotAllowedError' || /timeout/i.test(err?.message || '')) break;
+    }
   }
   throw lastError || new Error('Nie udało się uruchomić kamery.');
 }
@@ -124,7 +162,7 @@ async function startCamera() {
     startBtn.textContent = 'Kamera działa'; recordBtn.disabled = false;
     resizeCanvas(); requestAnimationFrame(renderLoop);
     setTimeout(initHands, 20);
-    setTimeout(() => initAnime(false), 80);
+    setTimeout(() => initAnime(false), 350);
   } catch (err) {
     running = false; cameraState = 'BŁĄD'; updateDiag(); startBtn.disabled = false; startBtn.textContent = 'Spróbuj ponownie';
     setStatus('Nie udało się uruchomić kamery'); showError(readableCameraError(err));
@@ -133,7 +171,7 @@ async function startCamera() {
 
 startBtn.addEventListener('click', startCamera);
 recordBtn.addEventListener('click', toggleRecording);
-setStatus('Gotowy • v9.2 CartoonGAN TFJS'); updateDiag();
+setStatus('Gotowy • v9.2.1 Camera-first'); updateDiag();
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -299,6 +337,24 @@ function adaptAiSize(ms) {
   }
 }
 
+async function ensureTfModules() {
+  if (tf) return tf;
+  if (tfModulesLoading) {
+    while (!tf) await new Promise(r => setTimeout(r, 30));
+    return tf;
+  }
+  tfModulesLoading = true;
+  cartoonState = 'ładowanie TFJS…'; updateDiag();
+  try {
+    const mod = await import('@tensorflow/tfjs');
+    tf = mod;
+    try { await import('@tensorflow/tfjs-backend-webgpu'); } catch (e) { console.warn('WebGPU backend import failed', e); }
+    return tf;
+  } finally {
+    tfModulesLoading = false;
+  }
+}
+
 async function testBackend(name) {
   await tf.setBackend(name);
   await tf.ready();
@@ -340,6 +396,7 @@ async function chooseTfBackend() {
 
 async function loadCartoonModel(style = 'shinkai') {
   if (loadingAnime) return;
+  await ensureTfModules();
   loadingAnime = true;
   cartoonReady = false; cartoonBusy = false; cartoonFrameValid = false;
   cartoonStyle = style;
