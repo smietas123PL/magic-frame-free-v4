@@ -212,21 +212,21 @@ void main(){
   float edge=semanticEdge(uv,px);float fmSkin=fm*skinMask(c);edge*=1.0-fmSkin*(mode==1?.35:(mode==2?.58:.66));
   vec3 ink=mode==3?vec3(.045,.035,.065):vec3(.070,.045,.085);float inkAmt=mode==1?.46:(mode==2?.78:.90);q=mix(q,ink,edge*inkAmt);
   // Flat anime face reconstruction: suppress residual photographic micro-texture.
-  if(fmSkin>.05){float L=lum(q);vec3 flat=mix(q,vec3(q.r*1.02,q.g*1.01,q.b*.985),.42);flat=floor(flat*(mode==3?4.0:5.0)+.5)/(mode==3?4.0:5.0);q=mix(q,flat,fmSkin*(mode==1?.32:(mode==2?.58:.70)));}
+  if(fmSkin>.05){float L=lum(q);vec3 flatColor=mix(q,vec3(q.r*1.02,q.g*1.01,q.b*.985),.42);flatColor=floor(flatColor*(mode==3?4.0:5.0)+.5)/(mode==3?4.0:5.0);q=mix(q,flatColor,fmSkin*(mode==1?.32:(mode==2?.58:.70)));}
   outColor=vec4(clamp(q,0.0,1.0),1.0);
 }`
     program=gl.createProgram();gl.attachShader(program,shader(gl,gl.VERTEX_SHADER,vs));gl.attachShader(program,shader(gl,gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));
     tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     vao=gl.createVertexArray();
     for(const name of ['res','mode','hasFace','eyeL','eyeR','faceC','jaw','forehead','faceW','faceH'])u[name]=gl.getUniformLocation(program,name);
-    fxState='WebGL2 Reconstruction v10.3 OK';
+    fxState='WebGL2 Reconstruction v10.3.2 OK';
   }catch(e){gl=null;fxState='Canvas fallback';console.warn(e);}updateDiag();
 }
 function resizeFx(w,h){const scale=Math.min(1,760/w);fxCanvas.width=Math.max(2,Math.round(w*scale));fxCanvas.height=Math.max(2,Math.round(h*scale));}
 function liveModeNumber(mode){return mode==='live-soft'?1:mode==='live-strong'?3:2;}
 function renderLiveFx(mode){
   const mn=liveModeNumber(mode);
-  if(!gl){const c=fxCanvas.getContext('2d');c.save();c.translate(fxCanvas.width,0);c.scale(-1,1);c.filter=mn===1?'saturate(1.12) contrast(1.08)':mn===3?'saturate(1.45) contrast(1.30)':'saturate(1.32) contrast(1.20)';c.drawImage(video,0,0,fxCanvas.width,fxCanvas.height);c.restore();return;}
+  if(!gl){const c=fxCanvas.getContext('2d');if(!c){fxState='FX fallback unavailable';return;}c.save();c.translate(fxCanvas.width,0);c.scale(-1,1);c.filter=mn===1?'saturate(1.12) contrast(1.08)':mn===3?'saturate(1.45) contrast(1.30)':'saturate(1.32) contrast(1.20)';c.drawImage(video,0,0,fxCanvas.width,fxCanvas.height);c.restore();return;}
   gl.viewport(0,0,fxCanvas.width,fxCanvas.height);gl.useProgram(program);gl.bindVertexArray(vao);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,video);gl.uniform2f(u.res,fxCanvas.width,fxCanvas.height);gl.uniform1i(u.mode,mn);
   const f=faceUniforms();gl.uniform1i(u.hasFace,f?1:0);if(f){gl.uniform2f(u.eyeL,f.eyeL.x,1-f.eyeL.y);gl.uniform2f(u.eyeR,f.eyeR.x,1-f.eyeR.y);gl.uniform2f(u.faceC,f.center.x,1-f.center.y);gl.uniform2f(u.jaw,f.jaw.x,1-f.jaw.y);gl.uniform2f(u.forehead,f.forehead.x,1-f.forehead.y);gl.uniform1f(u.faceW,f.width);gl.uniform1f(u.faceH,f.height);}gl.drawArrays(gl.TRIANGLES,0,3);
 }
@@ -299,4 +299,4 @@ async function renderLoop(ts){
   drawDebug(semantic,q,raw);requestAnimationFrame(renderLoop);
 }
 
-setStatus('Gotowy • v10.3 Anime Reconstruction');
+setStatus('Gotowy • v10.3.2 Anime Reconstruction');

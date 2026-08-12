@@ -1,6 +1,6 @@
-# Magic Frame Free v10.3 — Anime Reconstruction
+# Magic Frame Free v10.3.2 — Anime Reconstruction
 
-Realtime browser effect for Vercel. v10.3 keeps the freeform/self-crossing hand frame and replaces the v10.2 comic-like rendering with a reconstruction-first Anime Live pipeline.
+Realtime browser effect for Vercel. v10.3.2 keeps the freeform/self-crossing hand frame and replaces the v10.2 comic-like rendering with a reconstruction-first Anime Live pipeline.
 
 ## What changed
 
