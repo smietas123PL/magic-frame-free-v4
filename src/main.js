@@ -142,7 +142,7 @@ function faceUniforms(){
   return{eyeL,eyeR,center:nose,jaw,forehead,mouth,width:Math.max(.08,dist(cheekL,cheekR)),height:Math.max(.1,dist(forehead,jaw))};
 }
 
-// ---------- realtime WebGL2 anime v10.1 ----------
+// ---------- realtime WebGL2 whole-scene anime v10.2 ----------
 let gl=null,program=null,tex=null,vao=null;
 let u={};
 function shader(gl,type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
@@ -160,45 +160,69 @@ float satv(vec3 c){float ma=max(c.r,max(c.g,c.b)),mi=min(c.r,min(c.g,c.b));retur
 vec2 magnify(vec2 uv,vec2 c,float r,float k){vec2 d=uv-c;float x=length(d)/max(r,.0001);if(x<1.0){float s=mix(1.0-k,1.0,smoothstep(0.0,1.0,x));uv=c+d*s;}return uv;}
 vec2 warpFace(vec2 uv){
   if(hasFace==0)return uv;
-  float eyeK=mode==1?.10:(mode==2?.21:.29);
-  float jawK=mode==1?.05:(mode==2?.14:.21);
-  uv=magnify(uv,eyeL,faceW*.19,eyeK);uv=magnify(uv,eyeR,faceW*.19,eyeK);
-  float y0=faceC.y+faceH*.02;float y1=jaw.y+faceH*.05;
-  if(uv.y>y0&&uv.y<y1){float tt=smoothstep(y0,y1,uv.y);uv.x=faceC.x+(uv.x-faceC.x)*(1.0+jawK*tt);}
+  float eyeK=mode==1?.11:(mode==2?.24:.32);
+  float jawK=mode==1?.055:(mode==2?.16:.23);
+  float chinK=mode==1?.018:(mode==2?.045:.065);
+  uv=magnify(uv,eyeL,faceW*.205,eyeK);uv=magnify(uv,eyeR,faceW*.205,eyeK);
+  float y0=faceC.y+faceH*.015;float y1=jaw.y+faceH*.07;
+  if(uv.y>y0&&uv.y<y1){float tt=smoothstep(y0,y1,uv.y);uv.x=faceC.x+(uv.x-faceC.x)*(1.0+jawK*tt);uv.y-=chinK*tt*faceH;}
   return uv;
 }
-float faceMask(vec2 uv){if(hasFace==0)return 0.0;vec2 d=vec2((uv.x-faceC.x)/(faceW*.58),(uv.y-(faceC.y+faceH*.05))/(faceH*.60));return 1.0-smoothstep(.72,1.05,length(d));}
-vec3 sampleSmooth(vec2 uv,vec2 px,float amount){
-  vec3 c=texture(t,uv).rgb;
-  vec3 n=texture(t,uv+vec2(px.x,0)).rgb+texture(t,uv-vec2(px.x,0)).rgb+texture(t,uv+vec2(0,px.y)).rgb+texture(t,uv-vec2(0,px.y)).rgb;
-  vec3 d=texture(t,uv+px).rgb+texture(t,uv-px).rgb+texture(t,uv+vec2(px.x,-px.y)).rgb+texture(t,uv+vec2(-px.x,px.y)).rgb;
-  vec3 b=(c*4.0+n*1.35+d*.55)/11.6;return mix(c,b,amount);
+float faceMask(vec2 uv){if(hasFace==0)return 0.0;vec2 d=vec2((uv.x-faceC.x)/(faceW*.60),(uv.y-(faceC.y+faceH*.045))/(faceH*.61));return 1.0-smoothstep(.72,1.04,length(d));}
+float skinMask(vec3 c){
+  float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b));
+  float sat=(mx-mn)/max(mx,.001);
+  float warm=smoothstep(-.03,.14,c.r-c.b)*smoothstep(-.06,.10,c.g-c.b);
+  float rg=1.0-smoothstep(.02,.26,abs(c.r-c.g));
+  float br=smoothstep(.18,.95,mx)*smoothstep(.06,.70,1.0-sat);
+  return clamp(warm*rg*br,0.0,1.0);
 }
-vec3 celColor(vec3 c,float levels,float strength){
-  float l=max(lum(c),.001);float q=floor(l*levels+.5)/levels;vec3 hue=c/l;vec3 outc=hue*q;
-  outc=mix(c,outc,strength);outc=pow(max(outc,0.0),vec3(.92));
-  outc.r*=1.045;outc.b*=1.025;return outc;
+vec3 bilateralLite(vec2 uv,vec2 px,float radius,float strength){
+  vec3 c=texture(t,uv).rgb;float lc=lum(c);vec3 sum=c*3.2;float wsum=3.2;
+  vec2 d1=px*radius,d2=px*radius*2.0;
+  vec2 offs[8]=vec2[8](vec2(d1.x,0),vec2(-d1.x,0),vec2(0,d1.y),vec2(0,-d1.y),vec2(d1.x,d1.y),vec2(-d1.x,d1.y),vec2(d1.x,-d1.y),vec2(-d1.x,-d1.y));
+  for(int i=0;i<8;i++){vec3 s=texture(t,uv+offs[i]).rgb;float dl=abs(lum(s)-lc);float w=exp(-dl*dl*80.0);sum+=s*w;wsum+=w;}
+  vec3 farc=(texture(t,uv+vec2(d2.x,0)).rgb+texture(t,uv-vec2(d2.x,0)).rgb+texture(t,uv+vec2(0,d2.y)).rgb+texture(t,uv-vec2(0,d2.y)).rgb)*.25;
+  vec3 b=sum/wsum;return mix(c,mix(b,farc,.15),strength);
+}
+vec3 animePalette(vec3 c,float levels,float strength){
+  float l=max(lum(c),.002);float q=floor(l*levels+.50)/levels;vec3 chroma=c/l;
+  chroma=mix(vec3(1.0),chroma,1.08);vec3 outc=chroma*q;
+  outc=mix(c,outc,strength);
+  float L=lum(outc);float shadowBand=1.0-smoothstep(.26,.42,L);float midBand=smoothstep(.34,.50,L)*(1.0-smoothstep(.62,.78,L));float hiBand=smoothstep(.70,.88,L);
+  outc*=1.0-shadowBand*(mode==1?.08:(mode==2?.16:.22));
+  outc=mix(outc,outc*vec3(1.035,.985,1.055),midBand*(mode==1?.10:.20));
+  outc=mix(outc,vec3(1.0,.965,.94),hiBand*(mode==1?.025:.055));
+  return pow(max(outc,0.0),vec3(.94));
+}
+float sobelEdge(vec2 uv,vec2 px){
+  float tl=lum(texture(t,uv+vec2(-px.x,-px.y)).rgb),tc=lum(texture(t,uv+vec2(0,-px.y)).rgb),tr=lum(texture(t,uv+vec2(px.x,-px.y)).rgb);
+  float ml=lum(texture(t,uv+vec2(-px.x,0)).rgb),mr=lum(texture(t,uv+vec2(px.x,0)).rgb);
+  float bl=lum(texture(t,uv+vec2(-px.x,px.y)).rgb),bc=lum(texture(t,uv+vec2(0,px.y)).rgb),br=lum(texture(t,uv+vec2(px.x,px.y)).rgb);
+  float gx=-tl-2.0*ml-bl+tr+2.0*mr+br;float gy=-tl-2.0*tc-tr+bl+2.0*bc+br;return length(vec2(gx,gy));
 }
 void main(){
   vec2 uv=vec2(1.0-vUv.x,vUv.y);uv=warpFace(uv);vec2 px=1.0/res;
-  float fm=faceMask(uv);float smoothAmt=mode==1?.34:(mode==2?.62:.76);vec3 c=sampleSmooth(uv,px,mix(.18,smoothAmt,fm));
-  float lL=lum(texture(t,uv-vec2(px.x,0)).rgb),lR=lum(texture(t,uv+vec2(px.x,0)).rgb),lU=lum(texture(t,uv-vec2(0,px.y)).rgb),lD=lum(texture(t,uv+vec2(0,px.y)).rgb);
-  float gx=lR-lL,gy=lD-lU;float edgeLen=length(vec2(gx,gy));float edge=smoothstep(mode==1?.085:(mode==2?.060:.047),mode==1?.19:(mode==2?.145:.115),edgeLen);
-  float levels=mode==1?8.0:(mode==2?5.0:4.0);float cel=mode==1?.48:(mode==2?.78:.90);vec3 q=celColor(c,levels,cel);
-  float L=lum(q);float shadowStep=mode==1?.34:(mode==2?.42:.48);float shadow=smoothstep(.52,.20,L)*shadowStep;q*=1.0-shadow;
-  float hair=(1.0-smoothstep(.16,.50,lum(c)))*smoothstep(.05,.25,satv(c)+.05)*(1.0-smoothstep(faceC.y-faceH*.02,faceC.y+faceH*.42,uv.y));
-  q=mix(q,q*vec3(.62,.64,.76),hair*(mode==1?.16:.30));
-  vec3 ink=vec3(.075,.055,.085);float inkAmt=mode==1?.32:(mode==2?.63:.78);q=mix(q,ink,edge*inkAmt);
+  vec3 src=texture(t,uv).rgb;float fm=faceMask(uv);float sm=skinMask(src);
+  float globalSmooth=mode==1?.42:(mode==2?.64:.74);float faceBoost=mix(1.0,1.28,fm*sm);
+  vec3 c=bilateralLite(uv,px,mode==3?1.65:1.35,clamp(globalSmooth*faceBoost,0.0,.92));
+  float edge1=sobelEdge(uv,px);float edge2=sobelEdge(uv,px*1.75);float edgeMix=max(edge1,edge2*.72);
+  float e0=mode==1?.36:(mode==2?.285:.235),e1=mode==1?.72:(mode==2?.56:.47);float edge=smoothstep(e0,e1,edgeMix);
+  float levels=mode==1?7.0:(mode==2?5.0:4.0);float pal=mode==1?.58:(mode==2?.84:.93);vec3 q=animePalette(c,levels,pal);
+  float skin=skinMask(c)*fm;if(skin>0.0){vec3 skinTone=vec3(max(q.r, q.g*1.035),q.g*1.015,q.b*.985);q=mix(q,skinTone,skin*(mode==1?.18:(mode==2?.34:.43)));}
+  float dark=1.0-smoothstep(.18,.46,lum(c));float upper=hasFace==1?1.0-smoothstep(faceC.y+faceH*.08,faceC.y+faceH*.48,uv.y):0.0;float hair=dark*upper*(1.0-skin*.8);q=mix(q,q*vec3(.69,.72,.88),hair*(mode==1?.13:(mode==2?.27:.36)));
+  vec3 ink=mode==3?vec3(.055,.045,.075):vec3(.075,.055,.085);float inkAmt=mode==1?.40:(mode==2?.70:.84);q=mix(q,ink,edge*inkAmt);
+  float tiny=abs(lum(src)-lum(c));q=mix(q,c,clamp(tiny*.35,0.0,.06));
   outColor=vec4(clamp(q,0.0,1.0),1.0);
 }`;
     program=gl.createProgram();gl.attachShader(program,shader(gl,gl.VERTEX_SHADER,vs));gl.attachShader(program,shader(gl,gl.FRAGMENT_SHADER,fs));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(program));
     tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     vao=gl.createVertexArray();
     for(const name of ['res','mode','hasFace','eyeL','eyeR','faceC','jaw','forehead','faceW','faceH'])u[name]=gl.getUniformLocation(program,name);
-    fxState='WebGL2 Anime v10.1 OK';
+    fxState='WebGL2 Whole-scene v10.2 OK';
   }catch(e){gl=null;fxState='Canvas fallback';console.warn(e);}updateDiag();
 }
-function resizeFx(w,h){const scale=Math.min(1,960/w);fxCanvas.width=Math.max(2,Math.round(w*scale));fxCanvas.height=Math.max(2,Math.round(h*scale));}
+function resizeFx(w,h){const scale=Math.min(1,760/w);fxCanvas.width=Math.max(2,Math.round(w*scale));fxCanvas.height=Math.max(2,Math.round(h*scale));}
 function liveModeNumber(mode){return mode==='live-soft'?1:mode==='live-strong'?3:2;}
 function renderLiveFx(mode){
   const mn=liveModeNumber(mode);
@@ -212,11 +236,25 @@ function drawAnimeLineArt(q,mode){
   const paths=[
     [33,160,158,133,153,144,163,7,33],[362,385,387,263,373,380,390,249,362],
     [70,63,105,66,107],[336,296,334,293,300],[61,146,91,181,84,17,314,405,321,375,291],
-    [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10]
+    [168,6,197,195,5],[10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10]
   ];
-  const strength=mode==='live-strong'?1:.78;ctx.save();ctx.clip(triangleUnionPath(q));ctx.strokeStyle=`rgba(45,28,50,${.62*strength})`;ctx.lineWidth=Math.max(1.2,canvas.width*(mode==='live-strong'?.0022:.00165));ctx.lineCap='round';ctx.lineJoin='round';
+  const strength=mode==='live-strong'?1:.84;ctx.save();ctx.clip(triangleUnionPath(q));ctx.lineCap='round';ctx.lineJoin='round';
+  // soft white under-stroke cleans photographic texture below the important anime lines
+  ctx.strokeStyle=`rgba(255,245,240,${.20*strength})`;ctx.lineWidth=Math.max(2.0,canvas.width*(mode==='live-strong'?.0040:.0031));
   for(const ids of paths){ctx.beginPath();const a=p(ids[0]);ctx.moveTo(a.x,a.y);for(let i=1;i<ids.length;i++){const b=p(ids[i]);ctx.lineTo(b.x,b.y);}ctx.stroke();}
-  const fu=faceUniforms();if(fu){for(const e of [fu.eyeL,fu.eyeR]){ctx.fillStyle=`rgba(255,255,255,${.72*strength})`;ctx.beginPath();ctx.arc(e.x*canvas.width,e.y*canvas.height,Math.max(1.8,canvas.width*.0032),0,Math.PI*2);ctx.fill();}}
+  ctx.strokeStyle=`rgba(43,26,52,${.82*strength})`;ctx.lineWidth=Math.max(1.25,canvas.width*(mode==='live-strong'?.00245:.0019));
+  for(const ids of paths){ctx.beginPath();const a=p(ids[0]);ctx.moveTo(a.x,a.y);for(let i=1;i<ids.length;i++){const b=p(ids[i]);ctx.lineTo(b.x,b.y);}ctx.stroke();}
+  const fu=faceUniforms();if(fu){
+    const eyeRadius=canvas.width*fu.width*(mode==='live-strong'?.030:.025);
+    for(const [idx,e] of [[0,fu.eyeL],[1,fu.eyeR]]){
+      const ex=e.x*canvas.width,ey=e.y*canvas.height;
+      const grad=ctx.createRadialGradient(ex-eyeRadius*.22,ey-eyeRadius*.25,eyeRadius*.10,ex,ey,eyeRadius);
+      grad.addColorStop(0,'rgba(250,252,255,.96)');grad.addColorStop(.25,idx===0?'rgba(104,126,190,.94)':'rgba(104,126,190,.94)');grad.addColorStop(.72,'rgba(50,54,92,.96)');grad.addColorStop(1,'rgba(20,18,35,.98)');
+      ctx.fillStyle=grad;ctx.beginPath();ctx.ellipse(ex,ey+eyeRadius*.08,eyeRadius*.62,eyeRadius,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(10,8,20,.96)';ctx.beginPath();ctx.arc(ex,ey+eyeRadius*.10,eyeRadius*.34,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,.92)';ctx.beginPath();ctx.arc(ex-eyeRadius*.20,ey-eyeRadius*.20,eyeRadius*.16,0,Math.PI*2);ctx.fill();
+    }
+  }
   ctx.restore();
 }
 function applyLiveFx(q,mode){renderLiveFx(mode);ctx.save();ctx.clip(triangleUnionPath(q));ctx.drawImage(fxCanvas,0,0,canvas.width,canvas.height);ctx.restore();drawAnimeLineArt(q,mode);}
@@ -239,7 +277,7 @@ effectSelect.addEventListener('change',()=>{if(isAiMode())initCartoon();else sto
 
 // ---------- recording/debug ----------
 function preferredMime(){return['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>MediaRecorder?.isTypeSupported?.(t))||'';}
-function toggleRecording(){if(!running||!MediaRecorder||!canvas.captureStream){showError('Nagrywanie niedostępne.');return;}if(mediaRecorder?.state==='recording'){mediaRecorder.stop();return;}recordedChunks=[];const mime=preferredMime(),s=canvas.captureStream(30);mediaRecorder=new MediaRecorder(s,mime?{mimeType:mime,videoBitsPerSecond:8_000_000}:{videoBitsPerSecond:8_000_000});mediaRecorder.ondataavailable=e=>{if(e.data?.size)recordedChunks.push(e.data)};mediaRecorder.onstop=()=>{const type=mediaRecorder.mimeType||mime||'video/webm',blob=new Blob(recordedChunks,{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`magic-frame-v10-1-${Date.now()}.${type.includes('mp4')?'mp4':'webm'}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);recordBtn.textContent='Nagraj';recBadge.hidden=true;};mediaRecorder.start(250);recordingStartedAt=performance.now();recordBtn.textContent='Stop';recBadge.hidden=false;}
+function toggleRecording(){if(!running||!MediaRecorder||!canvas.captureStream){showError('Nagrywanie niedostępne.');return;}if(mediaRecorder?.state==='recording'){mediaRecorder.stop();return;}recordedChunks=[];const mime=preferredMime(),s=canvas.captureStream(30);mediaRecorder=new MediaRecorder(s,mime?{mimeType:mime,videoBitsPerSecond:8_000_000}:{videoBitsPerSecond:8_000_000});mediaRecorder.ondataavailable=e=>{if(e.data?.size)recordedChunks.push(e.data)};mediaRecorder.onstop=()=>{const type=mediaRecorder.mimeType||mime||'video/webm',blob=new Blob(recordedChunks,{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`magic-frame-v10-2-${Date.now()}.${type.includes('mp4')?'mp4':'webm'}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);recordBtn.textContent='Nagraj';recBadge.hidden=true;};mediaRecorder.start(250);recordingStartedAt=performance.now();recordBtn.textContent='Stop';recBadge.hidden=false;}
 function drawDebug(s,q,raw){if(!debugToggle.checked)return;ctx.save();ctx.fillStyle='#00ffb4';for(const h of s)for(const p of h.pts){ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,2.5,0,Math.PI*2);ctx.fill();}if(raw){const t=raw.map(p=>({x:p.x*canvas.width,y:p.y*canvas.height}));ctx.setLineDash([6,6]);ctx.strokeStyle='#00ffff';ctx.beginPath();ctx.moveTo(t[0].x,t[0].y);for(let i=1;i<4;i++)ctx.lineTo(t[i].x,t[i].y);ctx.closePath();ctx.stroke();}ctx.restore();}
 function tickHand(now){handCompleted++;const dt=now-handWindowStart;if(dt>=700){handFps=handCompleted*1000/dt;handCompleted=0;handWindowStart=now;}}
 function tickRender(now){renderCompleted++;const dt=now-renderWindowStart;if(dt>=700){renderFps=renderCompleted*1000/dt;renderCompleted=0;renderWindowStart=now;updateDiag();}}
@@ -258,4 +296,4 @@ async function renderLoop(ts){
   drawDebug(semantic,q,raw);requestAnimationFrame(renderLoop);
 }
 
-setStatus('Gotowy • v10.1 Anime Live');
+setStatus('Gotowy • v10.2 Whole-scene Anime');

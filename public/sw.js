@@ -1,4 +1,4 @@
-const CACHE = 'magic-frame-v10-1-runtime-v1';
+const CACHE = 'magic-frame-v10-2-runtime-v1';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', event => {
