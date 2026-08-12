@@ -1,6 +1,6 @@
 {
-  "name": "magic-frame-free-v9-4-speed-ai",
-  "version": "9.4.0",
+  "name": "magic-frame-free-v10-anime-live",
+  "version": "10.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,10 +15,6 @@
     "@tensorflow/tfjs-backend-webgl": "4.22.0",
     "local-tfjs-models": "0.0.3"
   },
-  "devDependencies": {
-    "vite": "6.1.0"
-  },
-  "engines": {
-    "node": ">=18.18.0"
-  }
+  "devDependencies": { "vite": "6.1.0" },
+  "engines": { "node": ">=18.18.0" }
 }

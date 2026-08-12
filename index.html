@@ -5,34 +5,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
   <meta name="color-scheme" content="dark" />
-  <title>Magic Frame Free v9.3 · Worker AI</title>
+  <link rel="icon" href="data:," />
+  <title>Magic Frame Free v10 · Anime Live</title>
 </head>
 <body>
   <main id="app">
     <section class="stage">
       <video id="video" playsinline muted></video>
+      <canvas id="fxCanvas" hidden></canvas>
       <canvas id="canvas"></canvas>
-      <canvas id="animeCanvas" hidden width="192" height="192"></canvas>
-      <canvas id="inputCanvas" hidden width="192" height="192"></canvas>
+      <canvas id="animeCanvas" hidden width="128" height="128"></canvas>
+      <canvas id="inputCanvas" hidden width="128" height="128"></canvas>
       <div id="status" class="status">Ładowanie JS…</div>
-      <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · CartoonGAN: —</div>
+      <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · twarz: — · FX: —</div>
       <div id="recBadge" class="rec-badge" hidden>● REC</div>
     </section>
 
     <section class="controls">
       <button id="startBtn" class="primary">Uruchom kamerę</button>
       <button id="recordBtn" class="secondary" disabled>Nagraj</button>
-      <select id="effectSelect" aria-label="Styl anime">
-        <option value="shinkai">Anime Light · Shinkai</option>
-        <option value="paprika">Anime Light · Paprika</option>
+      <select id="effectSelect" aria-label="Tryb efektu">
+        <option value="live">Anime Live · realtime</option>
+        <option value="live-soft">Anime Live · soft</option>
+        <option value="ai-shinkai">AI Quality · Shinkai</option>
+        <option value="ai-paprika">AI Quality · Paprika</option>
         <option value="original">Oryginał w ramce</option>
       </select>
       <label class="toggle"><input id="debugToggle" type="checkbox" /> Debug tracking</label>
     </section>
 
     <section class="help">
-      <p><strong>v9.3:</strong> CartoonGAN działa w osobnym <strong>Web Workerze</strong>. Tracking dłoni, kamera i freeform/self-crossing quad nie czekają na inference AI.</p>
-      <p>AI używa <strong>latest-frame-wins</strong>, wejścia 160–224 px i asynchronicznego readbacku w Workerze. Diagnostyka pokazuje osobno AI total, compute/readback, Hands FPS i Render FPS.</p>
+      <p><strong>v10:</strong> domyślny Anime Live działa lokalnie w WebGL2 — bez GAN-a w krytycznej ścieżce. Tracking i freeform/self-crossing quad pozostają realtime.</p>
+      <p>AI Quality nadal jest dostępne jako opcja. Modele i WASM są cache’owane lokalnie po pierwszym użyciu.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>
   </main>
