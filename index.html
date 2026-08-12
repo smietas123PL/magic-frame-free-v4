@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
   <meta name="color-scheme" content="dark" />
-  <title>Magic Frame Free v5</title>
+  <title>Magic Frame Free v6</title>
 </head>
 <body>
   <main id="app">
@@ -13,24 +13,24 @@
       <video id="video" playsinline muted></video>
       <canvas id="canvas"></canvas>
       <div id="status" class="status">Ładowanie JS…</div>
-      <div id="diag" class="diag">JS: … · kamera: — · tracker: —</div>
+      <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · twarz: —</div>
     </section>
 
     <section class="controls">
       <button id="startBtn" class="primary">Uruchom kamerę</button>
       <select id="effectSelect" aria-label="Efekt obrazu">
-        <option value="comic">Comic</option>
-        <option value="anime">Anime Look</option>
+        <option value="anime">Anime Face</option>
+        <option value="comic">Comic Face</option>
+        <option value="clay">Clay Face</option>
         <option value="cyber">Cyberpunk</option>
-        <option value="clay">Clay</option>
         <option value="glitch">Glitch</option>
         <option value="bw">B&amp;W</option>
       </select>
-      <label class="toggle"><input id="debugToggle" type="checkbox" /> Punkty dłoni</label>
+      <label class="toggle"><input id="debugToggle" type="checkbox" /> Punkty dłoni i twarzy</label>
     </section>
 
     <section class="help">
-      <p>Pokaż obie dłonie i wyciągnij kciuki oraz palce wskazujące. Nie musisz układać idealnego „L” — v5 toleruje naturalny gest. Efekt pojawi się wewnątrz ramki między palcami.</p>
+      <p>v6: cztery końcówki palców tworzą obracany czworokąt. Face Landmarker działa lokalnie i wzmacnia efekty twarzy wewnątrz ramki. Wszystko bez płatnego API.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>
   </main>
