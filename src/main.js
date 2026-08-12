@@ -38,7 +38,8 @@ function showError(t){errorEl.hidden=!t;errorEl.textContent=t||'';}
 
 // ---------- diagnostics ----------
 function updateDiag(){
-  const ai = isAiMode() ? ` · AI: ${cartoonState}${lastCartoonMs?` ${Math.round(lastCartoonMs)}ms/${cartoonFps.toFixed(1)}fps`:''}` : '';
+  const neuralActive=isLiveMode()||isAiMode();
+  const ai = neuralActive ? ` · NeuralFace: ${cartoonState}${lastCartoonMs?` ${Math.round(lastCartoonMs)}ms/${cartoonFps.toFixed(1)}fps`:''}${lastCartoonDone?` age ${Math.round(performance.now()-lastCartoonDone)}ms`:''}` : '';
   diagEl.textContent=`JS: OK · kamera: ${cameraState} · dłonie: ${handState} ${handFps.toFixed(0)}fps · twarz: ${faceState} · FX: ${fxState} · R ${renderFps.toFixed(0)}fps${ai}`;
 }
 updateDiag();
@@ -88,7 +89,7 @@ async function startCamera(){
     await new Promise(r=>{if(video.readyState>=1)return r();video.addEventListener('loadedmetadata',r,{once:true});setTimeout(r,1500);});
     await video.play(); running=true; cameraState='OK'; resizeCanvas(); initLiveFx();
     startBtn.textContent='Kamera działa'; recordBtn.disabled=false; setStatus('Kamera działa · pokaż 2 dłonie'); updateDiag();
-    requestAnimationFrame(renderLoop); setTimeout(initHands,20); setTimeout(initFace,120);
+    requestAnimationFrame(renderLoop); setTimeout(initHands,20); setTimeout(initFace,120); setTimeout(()=>{if(needsNeuralFace())initCartoon();},650);
   }catch(e){running=false;cameraState='BŁĄD';startBtn.disabled=false;startBtn.textContent='Spróbuj ponownie';showError(readableCameraError(e));updateDiag();}
 }
 startBtn.addEventListener('click',startCamera);
@@ -295,7 +296,7 @@ void main(){
     tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     vao=gl.createVertexArray();
     for(const name of ['res','mode','hasFace','eyeL','eyeR','faceC','jaw','forehead','faceW','faceH'])u[name]=gl.getUniformLocation(program,name);
-    fxState='WebGL2 Face Reconstruction v11 OK';
+    fxState='WebGL2 Hybrid Anime v12 OK';
   }catch(e){gl=null;fxState='Canvas fallback';console.warn(e);}updateDiag();
 }
 function resizeFx(w,h){const scale=Math.min(1,760/w);fxCanvas.width=Math.max(2,Math.round(w*scale));fxCanvas.height=Math.max(2,Math.round(h*scale));}
@@ -390,27 +391,104 @@ function drawFaceReconstruction(q,mode){
   ctx.restore();
 }
 
-function applyLiveFx(q,mode){renderLiveFx(mode);ctx.save();ctx.clip(triangleUnionPath(q));ctx.drawImage(fxCanvas,0,0,canvas.width,canvas.height);ctx.restore();drawFaceReconstruction(q,mode);}
+function applyLiveFx(q,mode){
+  renderLiveFx(mode);
+  ctx.save();ctx.clip(triangleUnionPath(q));ctx.drawImage(fxCanvas,0,0,canvas.width,canvas.height);ctx.restore();
+  if(cartoonReady&&lastCartoonDone)applyNeuralFace(q,mode==='live-strong'?.94:.88);
+  else drawFaceReconstruction(q,mode);
+}
 
-// ---------- optional CartoonGAN quality worker ----------
+// ---------- v12 hybrid neural face worker ----------
 let cartoonWorker=null,cartoonReady=false,cartoonBusy=false,cartoonState='wyłączony',cartoonStyle='shinkai',lastCartoonMs=0,lastCartoonDone=0,cartoonCompleted=0,cartoonWindowStart=performance.now(),cartoonFps=0,aiRequestId=0,latestQuadForAi=null;
+let neuralFaceMeta=null, neuralFacePendingMeta=null;
 const AI_SIZE=96;
 function isAiMode(){return effectSelect.value.startsWith('ai-');}
-function stopCartoon(){cartoonWorker?.terminate();cartoonWorker=null;cartoonReady=false;cartoonBusy=false;cartoonState='wyłączony';}
+function isLiveMode(){const m=effectSelect.value;return m==='live'||m==='live-soft'||m==='live-strong';}
+function needsNeuralFace(){return isLiveMode()||isAiMode();}
+function stopCartoon(){cartoonWorker?.terminate();cartoonWorker=null;cartoonReady=false;cartoonBusy=false;cartoonState='wyłączony';neuralFaceMeta=null;neuralFacePendingMeta=null;}
+
+function currentFaceMeta(){
+  const fu=faceUniforms();if(!fu)return null;
+  const dx=fu.eyeR.x-fu.eyeL.x,dy=fu.eyeR.y-fu.eyeL.y;
+  const angle=Math.atan2(dy,dx);
+  const cx=fu.center.x*canvas.width;
+  const cy=(fu.center.y-fu.height*.05)*canvas.height;
+  const side=clamp(Math.max(fu.width*canvas.width*1.85,fu.height*canvas.height*1.48),96,Math.min(canvas.width,canvas.height)*.78);
+  return{cx,cy,side,angle,width:fu.width,height:fu.height};
+}
+function faceCrop(meta){
+  const side=meta.side,dx=clamp(meta.cx-side/2,0,canvas.width-side),dy=clamp(meta.cy-side/2,0,canvas.height-side);
+  return{dx,dy,side,sx:canvas.width-(dx+side),sy:dy};
+}
 function initCartoon(){
-  if(!isAiMode()){stopCartoon();updateDiag();return;}const style=effectSelect.value.replace('ai-','');if(cartoonReady&&style===cartoonStyle)return;stopCartoon();cartoonStyle=style;cartoonState='load…';updateDiag();
-  cartoonWorker=new Worker(new URL('./cartoon-worker.js',import.meta.url),{type:'module'});cartoonWorker.onmessage=e=>{const m=e.data||{};if(m.type==='ready'){cartoonReady=true;cartoonState=`${String(m.backend).toUpperCase()} ${style} OK`;kickAi();}else if(m.type==='frame'){cartoonBusy=false;const img=new ImageData(new Uint8ClampedArray(m.rgba),m.size,m.size);animeCanvas.width=animeCanvas.height=m.size;animeCtx.putImageData(img,0,0);lastCartoonMs=m.totalMs||0;lastCartoonDone=performance.now();cartoonCompleted++;const dt=lastCartoonDone-cartoonWindowStart;if(dt>700){cartoonFps=cartoonCompleted*1000/dt;cartoonCompleted=0;cartoonWindowStart=lastCartoonDone;}kickAi();updateDiag();}else if(m.type==='error'){cartoonBusy=false;cartoonState='BŁĄD';updateDiag();}};
+  if(!needsNeuralFace()){stopCartoon();updateDiag();return;}
+  const style=isAiMode()?effectSelect.value.replace('ai-',''):'shinkai';
+  if(cartoonReady&&style===cartoonStyle)return;
+  stopCartoon();cartoonStyle=style;cartoonState='load…';updateDiag();
+  cartoonWorker=new Worker(new URL('./cartoon-worker.js',import.meta.url),{type:'module'});
+  cartoonWorker.onmessage=e=>{
+    const m=e.data||{};
+    if(m.type==='ready'){
+      cartoonReady=true;cartoonState=`${String(m.backend).toUpperCase()} ${style} OK`;kickNeuralFace();updateDiag();
+    }else if(m.type==='frame'){
+      cartoonBusy=false;
+      const img=new ImageData(new Uint8ClampedArray(m.rgba),m.size,m.size);
+      animeCanvas.width=animeCanvas.height=m.size;animeCtx.putImageData(img,0,0);
+      neuralFaceMeta=neuralFacePendingMeta?{...neuralFacePendingMeta}:null;
+      neuralFacePendingMeta=null;
+      lastCartoonMs=m.totalMs||0;lastCartoonDone=performance.now();cartoonCompleted++;
+      const dt=lastCartoonDone-cartoonWindowStart;if(dt>700){cartoonFps=cartoonCompleted*1000/dt;cartoonCompleted=0;cartoonWindowStart=lastCartoonDone;}
+      kickNeuralFace();updateDiag();
+    }else if(m.type==='error'){cartoonBusy=false;cartoonState='BŁĄD';console.warn('NeuralFace worker',m.message);updateDiag();}
+  };
   cartoonWorker.postMessage({type:'init',style,preferredBackend:/Windows/i.test(navigator.userAgent)?'webgl':'auto',modelUrl:`/models/cartoongan-${style}/model.json`});
 }
-function computeCrop(q){const p=q.map(v=>({x:v.x*canvas.width,y:v.y*canvas.height})),minX=Math.min(...p.map(v=>v.x)),maxX=Math.max(...p.map(v=>v.x)),minY=Math.min(...p.map(v=>v.y)),maxY=Math.max(...p.map(v=>v.y)),cx=(minX+maxX)/2,cy=(minY+maxY)/2;let side=clamp(Math.max(maxX-minX,maxY-minY)*1.28,Math.min(canvas.width,canvas.height)*.25,Math.min(canvas.width,canvas.height));const dx=clamp(cx-side/2,0,canvas.width-side),dy=clamp(cy-side/2,0,canvas.height-side);return{dx,dy,side,sx:canvas.width-(dx+side),sy:dy};}
-function kickAi(){if(!cartoonReady||cartoonBusy||!latestQuadForAi||!isAiMode()||video.readyState<2)return;cartoonBusy=true;const crop=computeCrop(latestQuadForAi);inputCanvas.width=inputCanvas.height=AI_SIZE;inputCtx.save();inputCtx.translate(AI_SIZE,0);inputCtx.scale(-1,1);inputCtx.drawImage(video,crop.sx,crop.sy,crop.side,crop.side,0,0,AI_SIZE,AI_SIZE);inputCtx.restore();const fr=inputCtx.getImageData(0,0,AI_SIZE,AI_SIZE);cartoonWorker.postMessage({type:'infer',requestId:++aiRequestId,size:AI_SIZE,rgba:fr.data.buffer},[fr.data.buffer]);}
-function applyAi(q){if(animeCanvas.width&&lastCartoonDone){const c=computeCrop(q);ctx.save();ctx.clip(triangleUnionPath(q));ctx.drawImage(animeCanvas,c.dx,c.dy,c.side,c.side);ctx.restore();}}
+function kickNeuralFace(){
+  if(!cartoonReady||cartoonBusy||!needsNeuralFace()||video.readyState<2||!latestFace)return;
+  const meta=currentFaceMeta();if(!meta)return;
+  const crop=faceCrop(meta);
+  cartoonBusy=true;neuralFacePendingMeta={...meta};
+  inputCanvas.width=inputCanvas.height=AI_SIZE;
+  inputCtx.save();inputCtx.clearRect(0,0,AI_SIZE,AI_SIZE);
+  inputCtx.translate(AI_SIZE,0);inputCtx.scale(-1,1);
+  inputCtx.drawImage(video,crop.sx,crop.sy,crop.side,crop.side,0,0,AI_SIZE,AI_SIZE);
+  inputCtx.restore();
+  const fr=inputCtx.getImageData(0,0,AI_SIZE,AI_SIZE);
+  cartoonWorker.postMessage({type:'infer',requestId:++aiRequestId,size:AI_SIZE,rgba:fr.data.buffer},[fr.data.buffer]);
+}
+function currentFaceClipPath(){
+  const fu=faceUniforms();if(!fu)return null;
+  const p=new Path2D();
+  const cx=fu.center.x*canvas.width,cy=(fu.center.y-fu.height*.08)*canvas.height;
+  p.ellipse(cx,cy,fu.width*canvas.width*.72,fu.height*canvas.height*.76,0,0,Math.PI*2);
+  return p;
+}
+function applyNeuralFace(q,alpha=.88){
+  if(!animeCanvas.width||!lastCartoonDone||!neuralFaceMeta||!latestFace)return;
+  const cur=currentFaceMeta();if(!cur)return;
+  const faceClip=currentFaceClipPath();if(!faceClip)return;
+  const delta=cur.angle-neuralFaceMeta.angle;
+  const scale=cur.side/Math.max(1,neuralFaceMeta.side);
 
-effectSelect.addEventListener('change',()=>{if(isAiMode())initCartoon();else stopCartoon();updateDiag();});
+  ctx.save();
+  ctx.clip(triangleUnionPath(q));
+  ctx.clip(faceClip);
+  ctx.globalAlpha=alpha;
+  ctx.imageSmoothingEnabled=true;
+  ctx.imageSmoothingQuality='high';
+  ctx.translate(cur.cx,cur.cy);
+  ctx.rotate(delta);
+  const drawSide=neuralFaceMeta.side*scale;
+  ctx.drawImage(animeCanvas,-drawSide/2,-drawSide/2,drawSide,drawSide);
+  ctx.restore();
+}
+function applyAi(q){applyNeuralFace(q,1.0);}
+
+effectSelect.addEventListener('change',()=>{if(needsNeuralFace())initCartoon();else stopCartoon();updateDiag();});
 
 // ---------- recording/debug ----------
 function preferredMime(){return['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>MediaRecorder?.isTypeSupported?.(t))||'';}
-function toggleRecording(){if(!running||!MediaRecorder||!canvas.captureStream){showError('Nagrywanie niedostępne.');return;}if(mediaRecorder?.state==='recording'){mediaRecorder.stop();return;}recordedChunks=[];const mime=preferredMime(),s=canvas.captureStream(30);mediaRecorder=new MediaRecorder(s,mime?{mimeType:mime,videoBitsPerSecond:8_000_000}:{videoBitsPerSecond:8_000_000});mediaRecorder.ondataavailable=e=>{if(e.data?.size)recordedChunks.push(e.data)};mediaRecorder.onstop=()=>{const type=mediaRecorder.mimeType||mime||'video/webm',blob=new Blob(recordedChunks,{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`magic-frame-v11-${Date.now()}.${type.includes('mp4')?'mp4':'webm'}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);recordBtn.textContent='Nagraj';recBadge.hidden=true;};mediaRecorder.start(250);recordingStartedAt=performance.now();recordBtn.textContent='Stop';recBadge.hidden=false;}
+function toggleRecording(){if(!running||!MediaRecorder||!canvas.captureStream){showError('Nagrywanie niedostępne.');return;}if(mediaRecorder?.state==='recording'){mediaRecorder.stop();return;}recordedChunks=[];const mime=preferredMime(),s=canvas.captureStream(30);mediaRecorder=new MediaRecorder(s,mime?{mimeType:mime,videoBitsPerSecond:8_000_000}:{videoBitsPerSecond:8_000_000});mediaRecorder.ondataavailable=e=>{if(e.data?.size)recordedChunks.push(e.data)};mediaRecorder.onstop=()=>{const type=mediaRecorder.mimeType||mime||'video/webm',blob=new Blob(recordedChunks,{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`magic-frame-v12-${Date.now()}.${type.includes('mp4')?'mp4':'webm'}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);recordBtn.textContent='Nagraj';recBadge.hidden=true;};mediaRecorder.start(250);recordingStartedAt=performance.now();recordBtn.textContent='Stop';recBadge.hidden=false;}
 function drawDebug(s,q,raw){if(!debugToggle.checked)return;ctx.save();ctx.fillStyle='#00ffb4';for(const h of s)for(const p of h.pts){ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,2.5,0,Math.PI*2);ctx.fill();}if(raw){const t=raw.map(p=>({x:p.x*canvas.width,y:p.y*canvas.height}));ctx.setLineDash([6,6]);ctx.strokeStyle='#00ffff';ctx.beginPath();ctx.moveTo(t[0].x,t[0].y);for(let i=1;i<4;i++)ctx.lineTo(t[i].x,t[i].y);ctx.closePath();ctx.stroke();}ctx.restore();}
 function tickHand(now){handCompleted++;const dt=now-handWindowStart;if(dt>=700){handFps=handCompleted*1000/dt;handCompleted=0;handWindowStart=now;}}
 function tickRender(now){renderCompleted++;const dt=now-renderWindowStart;if(dt>=700){renderFps=renderCompleted*1000/dt;renderCompleted=0;renderWindowStart=now;updateDiag();}}
@@ -421,12 +499,16 @@ async function renderLoop(ts){
   if(faceReady&&video.readyState>=2&&ts-lastFaceDetect>FACE_INTERVAL){lastFaceDetect=ts;try{latestFace=faceLandmarker.detectForVideo(video,ts).faceLandmarks?.[0]||null;}catch{}}
   const semantic=semanticHands(latestHands,latestHandedness),raw=measureFreeformQuad(semantic),q=smoothQuad(raw,ts),mode=effectSelect.value;
   if(q){
+    latestQuadForAi=q.map(p=>({...p}));
+    if(needsNeuralFace()){if(!cartoonWorker)initCartoon();kickNeuralFace();}
     if(mode==='live'||mode==='live-soft'||mode==='live-strong')applyLiveFx(q,mode);
-    else if(isAiMode()){latestQuadForAi=q.map(p=>({...p}));kickAi();applyAi(q);}
-    drawFrame(q);const extra=isAiMode()&&lastCartoonDone?` · AI ${Math.round(performance.now()-lastCartoonDone)}ms old`:'';setStatus(`2/2 dłonie · ${mode==='live'?'ANIME':mode==='live-soft'?'ANIME SOFT':mode==='live-strong'?'STRONG ANIME':mode==='original'?'ORIGINAL':'AI QUALITY'}${extra}`);
+    else if(isAiMode())applyAi(q);
+    drawFrame(q);
+    const extra=needsNeuralFace()&&lastCartoonDone?` · neural ${Math.round(performance.now()-lastCartoonDone)}ms · ${cartoonFps.toFixed(1)}fps`:'';
+    setStatus(`2/2 dłonie · ${mode==='live'?'HYBRID ANIME':mode==='live-soft'?'HYBRID SOFT':mode==='live-strong'?'HYBRID STRONG':mode==='original'?'ORIGINAL':'AI FACE'}${extra}`);
   }else{latestQuadForAi=null;if(handsReady)setStatus(`${Math.min(2,semantic.length)}/2 dłonie`);}
   if(mediaRecorder?.state==='recording')recBadge.textContent=`● REC ${Math.floor((ts-recordingStartedAt)/1000)}s`;
   drawDebug(semantic,q,raw);requestAnimationFrame(renderLoop);
 }
 
-setStatus('Gotowy • v11 Face Reconstruction');
+setStatus('Gotowy • v12 Hybrid Anime');
