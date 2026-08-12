@@ -21,10 +21,13 @@ let latestHands = [];
 let latestHandedness = [];
 let smoothRect = null;
 let frameCounter = 0;
+let lastValidRectAt = 0;
+let heldRect = null;
 let cameraState = '—';
 let trackerState = '—';
 
-const DETECT_INTERVAL = 1000 / 20;
+const DETECT_INTERVAL = 1000 / 24;
+const RECT_HOLD_MS = 260;
 
 function setStatus(text) { statusEl.textContent = text; }
 function updateDiag() { diagEl.textContent = `JS: OK · kamera: ${cameraState} · tracker: ${trackerState}`; }
@@ -148,7 +151,7 @@ async function startCamera() {
 }
 
 startBtn.addEventListener('click', startCamera);
-setStatus('Gotowy • v4');
+setStatus('Gotowy • v5');
 updateDiag();
 
 window.addEventListener('error', (ev) => {
@@ -175,34 +178,60 @@ function sortHands(hands, handedness) {
 }
 function pointDistance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
-function lGestureScore(pts) {
-  const wrist = pts[0], thumb = pts[4], index = pts[8], indexMcp = pts[5], middle = pts[12], ring = pts[16], pinky = pts[20];
-  const palm = Math.max(pointDistance(wrist, indexMcp), 0.05);
-  const thumbOpen = pointDistance(thumb, indexMcp) / palm;
-  const indexOpen = pointDistance(index, wrist) / palm;
-  const folded = (pointDistance(middle, wrist) + pointDistance(ring, wrist) + pointDistance(pinky, wrist)) / (3 * palm);
-  return thumbOpen > 0.75 && indexOpen > 1.2 && folded < 1.45;
+function fingerFrameHandReady(pts) {
+  // v5: celowo luźniejszy gest. Nie wymagamy idealnego kąta 90° ani złożonych pozostałych palców.
+  const wrist = pts[0];
+  const thumbMcp = pts[2];
+  const thumbTip = pts[4];
+  const indexMcp = pts[5];
+  const indexPip = pts[6];
+  const indexTip = pts[8];
+  const palm = Math.max(pointDistance(wrist, indexMcp), 0.045);
+
+  const indexLength = pointDistance(indexTip, indexMcp) / palm;
+  const thumbLength = pointDistance(thumbTip, thumbMcp) / palm;
+  const tipsApart = pointDistance(indexTip, thumbTip) / palm;
+  const indexExtended = indexLength > 0.72 && pointDistance(indexTip, wrist) > pointDistance(indexPip, wrist) * 1.03;
+  const thumbExtended = thumbLength > 0.42;
+  const cornerOpen = tipsApart > 0.48;
+
+  return indexExtended && thumbExtended && cornerOpen;
 }
 
 function computeRect(sorted) {
   if (sorted.length < 2) return null;
   const a = sorted[0].pts, b = sorted[1].pts;
-  if (!lGestureScore(a) || !lGestureScore(b)) return null;
+  if (!fingerFrameHandReady(a) || !fingerFrameHandReady(b)) return null;
+
+  // Cztery końcówki palców definiują obszar. Dzięki temu dłonie nie muszą być idealnie symetryczne.
   const xs = [a[4].x, a[8].x, b[4].x, b[8].x];
   const ys = [a[4].y, a[8].y, b[4].y, b[8].y];
   let x = Math.min(...xs), y = Math.min(...ys), r = Math.max(...xs), bot = Math.max(...ys);
-  const pad = 0.012;
+  const pad = 0.014;
   x = Math.max(0, x - pad); y = Math.max(0, y - pad); r = Math.min(1, r + pad); bot = Math.min(1, bot + pad);
-  if (r - x < 0.12 || bot - y < 0.10) return null;
+  if (r - x < 0.10 || bot - y < 0.075) return null;
   return { x, y, w: r - x, h: bot - y };
 }
 
-function smoothRectangle(next) {
-  if (!next) { smoothRect = null; return null; }
-  if (!smoothRect) { smoothRect = { ...next }; return smoothRect; }
-  const a = 0.22;
-  for (const k of ['x', 'y', 'w', 'h']) smoothRect[k] += (next[k] - smoothRect[k]) * a;
-  return smoothRect;
+function smoothRectangle(next, now) {
+  if (next) {
+    lastValidRectAt = now;
+    heldRect = { ...next };
+    if (!smoothRect) { smoothRect = { ...next }; return smoothRect; }
+    const centerJump = Math.hypot(
+      (next.x + next.w / 2) - (smoothRect.x + smoothRect.w / 2),
+      (next.y + next.h / 2) - (smoothRect.y + smoothRect.h / 2)
+    );
+    const a = centerJump > 0.18 ? 0.42 : 0.26;
+    for (const k of ['x', 'y', 'w', 'h']) smoothRect[k] += (next[k] - smoothRect[k]) * a;
+    return smoothRect;
+  }
+
+  // Krótkie dropout-hold: pojedyncza zgubiona klatka nie powoduje zniknięcia efektu.
+  if (smoothRect && now - lastValidRectAt <= RECT_HOLD_MS) return smoothRect;
+  smoothRect = null;
+  heldRect = null;
+  return null;
 }
 
 function drawVideo() {
@@ -281,10 +310,11 @@ async function renderLoop(ts) {
   }
 
   const sorted = sortHands(latestHands, latestHandedness);
-  const rect = smoothRectangle(computeRect(sorted));
+  const rawRect = computeRect(sorted);
+  const rect = smoothRectangle(rawRect, ts);
   if (trackerReady) {
     if (rect) { applyEffect(rect, effectSelect.value); setStatus(`Efekt: ${effectSelect.options[effectSelect.selectedIndex].text}`); }
-    else setStatus(sorted.length < 2 ? 'Pokaż obie dłonie' : 'Ułóż dłonie w dwa gesty L');
+    else setStatus(sorted.length < 2 ? 'Pokaż obie dłonie' : 'Wyciągnij kciuki i palce wskazujące');
     drawDebug(sorted);
   }
   requestAnimationFrame(renderLoop);

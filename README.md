@@ -1,4 +1,4 @@
-# Magic Frame Free v4
+# Magic Frame Free v5
 
 Wersja Vite + npm przygotowana pod Vercel. Nie używa dynamicznego importu MediaPipe z jsDelivr.
 
@@ -37,3 +37,10 @@ Na dole obrazu jest pasek:
 `JS: OK · kamera: ... · tracker: ...`
 
 Dzięki temu od razu wiadomo, czy problem dotyczy kamery, WASM, modelu czy inicjalizacji trackera.
+
+
+## Zmiany v5
+- luźniejsza detekcja gestu: dwie dłonie + wyciągnięty kciuk i wskazujący
+- brak wymogu idealnego kąta 90°
+- 260 ms podtrzymania ramki przy krótkim zgubieniu landmarków
+- szybszy tracking (do ok. 24 detekcji/s)
