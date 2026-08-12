@@ -17,8 +17,6 @@ const errorEl = document.getElementById('errorDetails');
 const diagEl = document.getElementById('diag');
 const recBadge = document.getElementById('recBadge');
 
-let tf = null;
-let tfModulesLoading = false;
 
 let handLandmarker = null;
 let stream = null;
@@ -171,7 +169,7 @@ async function startCamera() {
 
 startBtn.addEventListener('click', startCamera);
 recordBtn.addEventListener('click', toggleRecording);
-setStatus('Gotowy • v9.2.2 Camera-first');
+setStatus('Gotowy • v9.3 Worker AI');
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -278,7 +276,10 @@ function canvasQuad(q) { return q.map(p => ({ x: p.x * canvas.width, y: p.y * ca
 function pathQuad(q) { ctx.beginPath(); ctx.moveTo(q[0].x, q[0].y); for (let i = 1; i < q.length; i++) ctx.lineTo(q[i].x, q[i].y); ctx.closePath(); }
 
 
-// ---------- CartoonGAN Light / TensorFlow.js ----------
+// ---------- CartoonGAN Light / TensorFlow.js WORKER ----------
+// v9.3: inference nie wykonuje się już na głównym wątku. Main thread robi tylko
+// mały crop 160-224 px i wysyła RGBA do Worker. Dzięki temu MediaPipe + render
+// nie czekają na GAN, nawet jeżeli pojedyncza klatka anime trwa setki ms.
 function computeAnimeCrop(q) {
   const px = q.map(p => ({ x: p.x * canvas.width, y: p.y * canvas.height }));
   const minX = Math.min(...px.map(p => p.x)), maxX = Math.max(...px.map(p => p.x));
@@ -293,10 +294,10 @@ function computeAnimeCrop(q) {
 }
 
 const AI_SIZES = [160, 192, 224];
-let sizeIndex = 1;
+let sizeIndex = 0; // start FAST, podnosimy jakość tylko gdy Worker jest naprawdę szybki
 let stableFastFrames = 0;
 let slowFrames = 0;
-let cartoonModel = null;
+let cartoonWorker = null;
 let cartoonStyle = 'shinkai';
 let cartoonReady = false;
 let cartoonBusy = false;
@@ -305,10 +306,16 @@ let cartoonState = '—';
 let cartoonFrameValid = false;
 let lastCartoonDone = 0;
 let lastCartoonMs = 0;
+let lastCartoonComputeMs = 0;
+let lastCartoonReadMs = 0;
 let cartoonCompleted = 0;
 let cartoonWindowStart = performance.now();
 let cartoonFps = 0;
 let skippedBusy = 0;
+let latestQuadForAi = null;
+let aiKickScheduled = false;
+let aiRequestId = 0;
+
 
 function currentAiSize() { return AI_SIZES[sizeIndex]; }
 function setAiCanvasSize(size) {
@@ -328,118 +335,114 @@ function tickCartoonFps(now) {
 }
 function adaptAiSize(ms) {
   if (ms > 180) { slowFrames++; stableFastFrames = 0; }
-  else if (ms < 85) { stableFastFrames++; slowFrames = 0; }
+  else if (ms < 75) { stableFastFrames++; slowFrames = 0; }
   else { slowFrames = 0; stableFastFrames = 0; }
   if (slowFrames >= 2 && sizeIndex > 0) {
     sizeIndex--; slowFrames = 0; stableFastFrames = 0; setAiCanvasSize(currentAiSize());
-  } else if (stableFastFrames >= 10 && sizeIndex < AI_SIZES.length - 1) {
+  } else if (stableFastFrames >= 12 && sizeIndex < AI_SIZES.length - 1) {
     sizeIndex++; slowFrames = 0; stableFastFrames = 0; setAiCanvasSize(currentAiSize());
   }
 }
 
-async function ensureTfModules() {
-  if (tf) return tf;
-  if (tfModulesLoading) {
-    while (!tf) await new Promise(r => setTimeout(r, 30));
-    return tf;
-  }
-  tfModulesLoading = true;
-  cartoonState = 'ładowanie TFJS…'; updateDiag();
-  try {
-    const mod = await import('@tensorflow/tfjs');
-    tf = mod;
-    try { await import('@tensorflow/tfjs-backend-webgpu'); } catch (e) { console.warn('WebGPU backend import failed', e); }
-    return tf;
-  } finally {
-    tfModulesLoading = false;
-  }
+function stopCartoonWorker() {
+  if (cartoonWorker) cartoonWorker.terminate();
+  cartoonWorker = null;
+  cartoonReady = false;
+  cartoonBusy = false;
 }
 
-async function testBackend(name) {
-  await tf.setBackend(name);
-  await tf.ready();
-  const size = 160;
-  const dummy = tf.zeros([1, size, size, 3]);
-  let out;
-  const t0 = performance.now();
-  try {
-    out = cartoonModel.predict(dummy);
-    if (Array.isArray(out)) out = out[0];
-    await out.data();
-    return performance.now() - t0;
-  } finally {
-    dummy.dispose();
-    if (out?.dispose) out.dispose();
-  }
-}
-
-async function chooseTfBackend() {
-  const candidates = [];
-  if (navigator.gpu) candidates.push('webgpu');
-  candidates.push('webgl');
-  let best = null;
-  for (const backend of candidates) {
-    try {
-      cartoonState = `benchmark ${backend}…`; updateDiag();
-      const ms = await testBackend(backend);
-      if (!best || ms < best.ms) best = { backend, ms };
-    } catch (err) {
-      console.warn(`TFJS ${backend} benchmark failed`, err);
-    }
-  }
-  if (!best) throw new Error('TensorFlow.js nie uruchomił modelu ani przez WebGPU, ani WebGL.');
-  await tf.setBackend(best.backend);
-  await tf.ready();
-  cartoonBackend = best.backend.toUpperCase();
-  return best.ms;
-}
-
-async function loadCartoonModel(style = 'shinkai') {
-  if (loadingAnime) return;
-  await ensureTfModules();
-  loadingAnime = true;
-  cartoonReady = false; cartoonBusy = false; cartoonFrameValid = false;
+function startCartoonWorker(style) {
+  stopCartoonWorker();
   cartoonStyle = style;
-  cartoonState = `${style} load…`; updateDiag();
-  try {
-    if (cartoonModel?.dispose) cartoonModel.dispose();
-    cartoonModel = null;
-    tf.enableProdMode();
-    // Load graph first on WebGL for broad compatibility, then benchmark WebGPU vs WebGL.
-    await tf.setBackend('webgl'); await tf.ready();
-    cartoonModel = await tf.loadGraphModel(`/models/cartoongan-${style}/model.json`);
-    cartoonState = `${style} warmup…`; updateDiag();
-    const bench = await chooseTfBackend();
-    cartoonReady = true;
-    sizeIndex = bench > 220 ? 0 : bench < 80 ? 2 : 1;
-    setAiCanvasSize(currentAiSize());
-    cartoonState = `${cartoonBackend} ${style} OK`;
+  cartoonFrameValid = false;
+  cartoonState = `${style} worker load…`;
+  updateDiag();
+  cartoonWorker = new Worker(new URL('./cartoon-worker.js', import.meta.url), { type: 'module' });
+
+  cartoonWorker.onmessage = (event) => {
+    const msg = event.data || {};
+    if (msg.type === 'ready') {
+      cartoonReady = true;
+      cartoonBusy = false;
+      cartoonBackend = String(msg.backend || 'worker').toUpperCase();
+      cartoonState = `${cartoonBackend} ${cartoonStyle} OK`;
+      setAiCanvasSize(currentAiSize());
+      updateDiag();
+      scheduleAiKick();
+      return;
+    }
+    if (msg.type === 'frame') {
+      cartoonBusy = false;
+      if (msg.requestId !== aiRequestId) {
+        scheduleAiKick();
+        return;
+      }
+      const rgba = new Uint8ClampedArray(msg.rgba);
+      const image = new ImageData(rgba, msg.size, msg.size);
+      if (animeCanvas.width !== msg.size || animeCanvas.height !== msg.size) {
+        animeCanvas.width = animeCanvas.height = msg.size;
+      }
+      animeCtx.putImageData(image, 0, 0);
+      lastCartoonDone = performance.now();
+      lastCartoonMs = Number(msg.totalMs || 0);
+      lastCartoonComputeMs = Number(msg.computeMs || 0);
+      lastCartoonReadMs = Number(msg.readMs || 0);
+      tickCartoonFps(lastCartoonDone);
+      adaptAiSize(lastCartoonMs);
+      cartoonFrameValid = true;
+      cartoonState = `${cartoonBackend} ${cartoonStyle} OK`;
+      updateDiag();
+      // Latest-frame-wins: od razu po zakończeniu bierzemy NAJNOWSZY quad/obraz,
+      // ale na osobnym ticku event loop, nigdy z requestAnimationFrame.
+      scheduleAiKick();
+      return;
+    }
+    if (msg.type === 'error') {
+      cartoonBusy = false;
+      cartoonReady = false;
+      cartoonState = 'BŁĄD';
+      updateDiag();
+      showError(`CartoonGAN Worker błąd: ${msg.message || 'nieznany błąd'}`);
+    }
+  };
+  cartoonWorker.onerror = (err) => {
+    cartoonBusy = false;
+    cartoonReady = false;
+    cartoonState = 'WORKER BŁĄD';
     updateDiag();
-  } catch (err) {
-    console.error(err);
-    cartoonState = 'BŁĄD'; updateDiag();
-    showError(`CartoonGAN nie wystartował. Tracking dłoni nadal działa.\n${err?.name || 'Error'}: ${err?.message || err}`);
-  } finally { loadingAnime = false; }
+    showError(`CartoonGAN Worker nie wystartował: ${err.message || err}`);
+  };
+  cartoonWorker.postMessage({
+    type: 'init',
+    style,
+    modelUrl: `/models/cartoongan-${style}/model.json`
+  });
 }
 
 async function initAnime(force = false) {
   const requested = effectSelect.value;
   if (requested === 'original') {
-    cartoonFrameValid = false; cartoonState = 'wyłączony'; updateDiag(); return;
+    cartoonFrameValid = false;
+    cartoonState = 'wyłączony';
+    stopCartoonWorker();
+    updateDiag();
+    return;
   }
   if (!force && cartoonReady && cartoonStyle === requested) return;
-  await loadCartoonModel(requested);
+  if (loadingAnime) return;
+  loadingAnime = true;
+  try { startCartoonWorker(requested); }
+  finally { loadingAnime = false; }
 }
 
 effectSelect.addEventListener('change', () => initAnime(true));
 
 function updateDiag() {
   const perf = cartoonReady && lastCartoonMs ? ` ${Math.round(lastCartoonMs)}ms` : '';
+  const split = cartoonReady && lastCartoonMs ? ` (GPU ${Math.round(lastCartoonComputeMs)} + read ${Math.round(lastCartoonReadMs)})` : '';
   const fps = cartoonReady ? ` · AI ${cartoonFps.toFixed(1)}fps · H ${handFps.toFixed(0)}fps · R ${renderFps.toFixed(0)}fps · ${currentAiSize()}px · skip ${skippedBusy}` : '';
-  diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · CartoonGAN: ${cartoonState}${perf}${fps}`;
+  diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · CartoonGAN: ${cartoonState}${perf}${split}${fps}`;
 }
-
-// Pierwsza diagnostyka dopiero po inicjalizacji wszystkich stanów CartoonGAN.
 updateDiag();
 
 function tickHandFps(now) {
@@ -453,43 +456,40 @@ function tickRenderFps(now) {
   if (dt >= 700) { renderFps = renderCompleted * 1000 / dt; renderCompleted = 0; renderWindowStart = now; updateDiag(); }
 }
 
-async function runCartoonInference(ts, q) {
-  if (!cartoonReady || !cartoonModel || video.readyState < 2 || effectSelect.value === 'original') return;
-  if (cartoonBusy) { skippedBusy++; return; }
-  cartoonBusy = true;
-  const start = performance.now();
+function scheduleAiKick() {
+  if (aiKickScheduled || cartoonBusy || !cartoonReady || !latestQuadForAi || effectSelect.value === 'original' || !running) return;
+  aiKickScheduled = true;
+  setTimeout(() => {
+    aiKickScheduled = false;
+    kickCartoonWorker();
+  }, 0);
+}
+
+function kickCartoonWorker() {
+  if (cartoonBusy || !cartoonReady || !cartoonWorker || !latestQuadForAi || video.readyState < 2 || effectSelect.value === 'original') return;
+  const q = latestQuadForAi;
   const size = currentAiSize();
   setAiCanvasSize(size);
   const crop = computeAnimeCrop(q);
-  let inputTensor = null, outputTensor = null, renderedTensor = null;
+  cartoonBusy = true;
+  aiRequestId++;
   try {
     inputCtx.save();
     inputCtx.clearRect(0, 0, size, size);
     inputCtx.translate(size, 0); inputCtx.scale(-1, 1);
     inputCtx.drawImage(video, crop.sx, crop.sy, crop.side, crop.side, 0, 0, size, size);
     inputCtx.restore();
-
-    // CartoonGAN TFJS reference pipeline: RGB -> BGR float 0..255 -> batch.
-    inputTensor = tf.browser.fromPixels(inputCanvas, 3).toFloat().reverse(2).expandDims(0);
-    outputTensor = cartoonModel.predict(inputTensor);
-    if (Array.isArray(outputTensor)) outputTensor = outputTensor[0];
-    renderedTensor = tf.tidy(() => outputTensor.squeeze([0]).reverse(2).mul(0.5).add(0.5).clipByValue(0, 1));
-    await tf.browser.toPixels(renderedTensor, animeCanvas);
-
-    lastCartoonDone = performance.now();
-    lastCartoonMs = lastCartoonDone - start;
-    tickCartoonFps(lastCartoonDone);
-    adaptAiSize(lastCartoonMs);
-    cartoonFrameValid = true;
-    cartoonState = `${cartoonBackend} ${cartoonStyle} OK`;
-    updateDiag();
+    // Mały CPU readback (160-224px) jest jedyną operacją wykonywaną na main thread.
+    // Cały TensorFlow.js + GAN + output readback działa w Workerze.
+    const frame = inputCtx.getImageData(0, 0, size, size);
+    cartoonWorker.postMessage({
+      type: 'infer', requestId: aiRequestId, size,
+      rgba: frame.data.buffer
+    }, [frame.data.buffer]);
   } catch (err) {
-    console.error('CartoonGAN inference failed', err);
-    cartoonState = 'BŁĄD'; updateDiag();
-    showError(`CartoonGAN inference błąd: ${err?.message || err}`);
-  } finally {
-    inputTensor?.dispose?.(); outputTensor?.dispose?.(); renderedTensor?.dispose?.();
     cartoonBusy = false;
+    console.error('CartoonGAN worker enqueue failed', err);
+    scheduleAiKick();
   }
 }
 
@@ -498,7 +498,6 @@ function applyAnimeFx(q) {
   const path = triangleUnionPath(q);
   ctx.save(); ctx.clip(path);
   if (cartoonFrameValid) {
-    // Latest AI image is always positioned using CURRENT polygon, not polygon from inference start.
     const current = computeAnimeCrop(q);
     ctx.drawImage(animeCanvas, current.dx, current.dy, current.side, current.side);
   } else {
@@ -573,13 +572,15 @@ async function renderLoop(ts) {
   const q = smoothFreeformQuad(rawQuad, ts);
 
   if (q) {
-    runCartoonInference(ts, q);
+    latestQuadForAi = q.map(p => ({ ...p }));
+    scheduleAiKick();
     applyAnimeFx(q); drawFrame(q);
     const age = cartoonFrameValid ? Math.max(0, performance.now() - lastCartoonDone) : 0;
     const ageText = cartoonFrameValid ? ` · AI ${Math.round(age)}ms old` : cartoonReady ? ' · AI pierwsza klatka…' : ' · AI ładowanie…';
     const mode = effectSelect.value === 'original' ? 'ORIGINAL' : `ANIME ${effectSelect.value.toUpperCase()}`;
     setStatus(`2/2 dłonie · ${mode}${ageText}`);
   } else if (handsReady) {
+    latestQuadForAi = null;
     const count = Math.min(2, semantic.length);
     setStatus(`${count}/2 dłonie${count === 2 ? ' · rozsuń palce' : ''}`);
   }

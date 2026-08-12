@@ -1,33 +1,24 @@
-# Magic Frame Free v9.1 — Performance
+# Magic Frame Free v9.3 — non-blocking CartoonGAN Worker
 
-Darmowa webowa aplikacja realtime: MediaPipe Hands + freeform/self-crossing quad + AnimeGANv2 uruchamiany lokalnie przez ONNX Runtime Web.
+Wersja v9.3 izoluje TensorFlow.js/CartoonGAN od głównego wątku przez Web Worker.
 
-## Co zmieniono w v9.1
+## Najważniejsze zmiany
+- MediaPipe Hands i requestAnimationFrame nie czekają na GAN.
+- CartoonGAN działa w `src/cartoon-worker.js`.
+- WebGPU jest używany w Workerze, z fallbackiem do CPU.
+- `executeAsync()` + `tensor.data()` zamiast `tf.browser.toPixels()` na main thread.
+- latest-frame-wins: brak kolejki starych klatek.
+- dynamiczne 160/192/224 px.
+- telemetry: AI total, compute, readback, Hands FPS, Render FPS.
 
-- `Anime FAST 256 · Shinkai` jest trybem domyślnym i wykonuje inference na 256×256.
-- `Anime QUALITY 512 · Face Portrait v2` pozostaje jako opcja jakościowa.
-- Latest-frame-wins: aplikacja nie kolejkuje klatek AI.
-- Tracking dłoni i compositing działają niezależnie od inference.
-- Wynik AI jest mapowany do aktualnego położenia wielokąta, a nie położenia z momentu rozpoczęcia inference.
-- Telemetria pokazuje backend, ms/klatkę AI, FPS AI, FPS renderera, FPS dłoni i rozdzielczość modelu.
-
-## Lokalnie
-
+## Uruchomienie
 ```powershell
 npm install
 npm run dev
 ```
 
-## Build / Vercel
-
+## Build Vercel
 ```powershell
-npm install
 npm run build
 vercel --prod --yes
 ```
-
-Podczas `npm run build` skrypt pobiera modele i kopiuje runtime WASM do `public/`.
-
-## Licencje modeli
-
-Sprawdź warunki licencyjne AnimeGANv2 przed użyciem komercyjnym. Ten projekt jest przeznaczony do prototypowania i testów.

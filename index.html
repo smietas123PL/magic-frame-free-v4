@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
   <meta name="color-scheme" content="dark" />
-  <title>Magic Frame Free v9.2 · CartoonGAN TFJS</title>
+  <title>Magic Frame Free v9.3 · Worker AI</title>
 </head>
 <body>
   <main id="app">
@@ -31,8 +31,8 @@
     </section>
 
     <section class="help">
-      <p><strong>v9.2:</strong> silnik AnimeGAN/ONNX został zastąpiony lekkim <strong>CartoonGAN uruchamianym przez TensorFlow.js</strong>. Tracking dłoni i freeform/self-crossing quad pozostały bez zmian.</p>
-      <p>Renderer używa <strong>latest-frame-wins</strong> i automatycznie dobiera wejście 160–224 px do szybkości GPU. Diagnostyka pokazuje backend, ms/klatkę i AI FPS. Jeśli WebGPU nie przejdzie testu, aplikacja automatycznie użyje WebGL.</p>
+      <p><strong>v9.3:</strong> CartoonGAN działa w osobnym <strong>Web Workerze</strong>. Tracking dłoni, kamera i freeform/self-crossing quad nie czekają na inference AI.</p>
+      <p>AI używa <strong>latest-frame-wins</strong>, wejścia 160–224 px i asynchronicznego readbacku w Workerze. Diagnostyka pokazuje osobno AI total, compute/readback, Hands FPS i Render FPS.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>
   </main>
