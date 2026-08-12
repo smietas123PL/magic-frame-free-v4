@@ -169,7 +169,7 @@ async function startCamera() {
 
 startBtn.addEventListener('click', startCamera);
 recordBtn.addEventListener('click', toggleRecording);
-setStatus('Gotowy • v9.3 Worker AI');
+setStatus('Gotowy • v9.4 Speed AI');
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(t => t.stop()));
 
 function resizeCanvas() {
@@ -293,8 +293,8 @@ function computeAnimeCrop(q) {
   return { dx, dy, side, sx, sy: dy };
 }
 
-const AI_SIZES = [160, 192, 224];
-let sizeIndex = 0; // start FAST, podnosimy jakość tylko gdy Worker jest naprawdę szybki
+const AI_SIZES = [96, 128, 160];
+let sizeIndex = 1; // 128px start: speed-first, 96px awaryjnie, 160px tylko gdy szybkie
 let stableFastFrames = 0;
 let slowFrames = 0;
 let cartoonWorker = null;
@@ -334,12 +334,12 @@ function tickCartoonFps(now) {
   }
 }
 function adaptAiSize(ms) {
-  if (ms > 180) { slowFrames++; stableFastFrames = 0; }
-  else if (ms < 75) { stableFastFrames++; slowFrames = 0; }
+  if (ms > 120) { slowFrames++; stableFastFrames = 0; }
+  else if (ms < 55) { stableFastFrames++; slowFrames = 0; }
   else { slowFrames = 0; stableFastFrames = 0; }
-  if (slowFrames >= 2 && sizeIndex > 0) {
+  if (slowFrames >= 1 && sizeIndex > 0) {
     sizeIndex--; slowFrames = 0; stableFastFrames = 0; setAiCanvasSize(currentAiSize());
-  } else if (stableFastFrames >= 12 && sizeIndex < AI_SIZES.length - 1) {
+  } else if (stableFastFrames >= 24 && sizeIndex < AI_SIZES.length - 1) {
     sizeIndex++; slowFrames = 0; stableFastFrames = 0; setAiCanvasSize(currentAiSize());
   }
 }
@@ -412,9 +412,13 @@ function startCartoonWorker(style) {
     updateDiag();
     showError(`CartoonGAN Worker nie wystartował: ${err.message || err}`);
   };
+  const isWindows = /Windows/i.test(navigator.userAgent);
   cartoonWorker.postMessage({
     type: 'init',
     style,
+    // Na Windows/Edge CartoonGAN TFJS w naszych testach na WebGPU miał wysoki narzut.
+    // WebGL jest domyślnym speed-first backendem; worker nadal ma fallback.
+    preferredBackend: isWindows ? 'webgl' : 'auto',
     modelUrl: `/models/cartoongan-${style}/model.json`
   });
 }
@@ -439,7 +443,7 @@ effectSelect.addEventListener('change', () => initAnime(true));
 
 function updateDiag() {
   const perf = cartoonReady && lastCartoonMs ? ` ${Math.round(lastCartoonMs)}ms` : '';
-  const split = cartoonReady && lastCartoonMs ? ` (GPU ${Math.round(lastCartoonComputeMs)} + read ${Math.round(lastCartoonReadMs)})` : '';
+  const split = cartoonReady && lastCartoonMs ? ` (infer ${Math.round(lastCartoonComputeMs)} · read ${Math.round(lastCartoonReadMs)})` : '';
   const fps = cartoonReady ? ` · AI ${cartoonFps.toFixed(1)}fps · H ${handFps.toFixed(0)}fps · R ${renderFps.toFixed(0)}fps · ${currentAiSize()}px · skip ${skippedBusy}` : '';
   diagEl.textContent = `JS: OK · kamera: ${cameraState} · dłonie: ${handState} · CartoonGAN: ${cartoonState}${perf}${split}${fps}`;
 }

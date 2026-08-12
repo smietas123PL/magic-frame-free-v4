@@ -1,6 +1,6 @@
-# Magic Frame Free v9.3 — non-blocking CartoonGAN Worker
+# Magic Frame Free v9.4 — non-blocking CartoonGAN Worker
 
-Wersja v9.3 izoluje TensorFlow.js/CartoonGAN od głównego wątku przez Web Worker.
+Wersja v9.4 izoluje TensorFlow.js/CartoonGAN od głównego wątku przez Web Worker.
 
 ## Najważniejsze zmiany
 - MediaPipe Hands i requestAnimationFrame nie czekają na GAN.
@@ -22,3 +22,10 @@ npm run dev
 npm run build
 vercel --prod --yes
 ```
+
+
+## v9.4 Speed AI
+- Windows/Edge: prefer WebGL over WebGPU for CartoonGAN TFJS.
+- GraphModel uses execute() instead of executeAsync().
+- Adaptive inference: 96/128/160 px, starting at 128 px.
+- Web Worker + latest-frame-wins preserved.

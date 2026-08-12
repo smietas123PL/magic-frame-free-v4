@@ -1,5 +1,6 @@
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgpu';
+import '@tensorflow/tfjs-backend-webgl';
 
 let model = null;
 let backend = 'cpu';
@@ -10,41 +11,54 @@ function postError(err) {
   self.postMessage({ type: 'error', message: `${err?.name || 'Error'}: ${err?.message || err}` });
 }
 
-async function chooseBackend() {
-  if (self.navigator?.gpu) {
+async function setPreferredBackend(preferred = 'auto') {
+  const candidates = [];
+  if (preferred === 'webgl') candidates.push('webgl', 'webgpu', 'cpu');
+  else if (preferred === 'webgpu') candidates.push('webgpu', 'webgl', 'cpu');
+  else candidates.push('webgl', 'webgpu', 'cpu');
+
+  for (const candidate of candidates) {
+    if (candidate === 'webgpu' && !self.navigator?.gpu) continue;
     try {
-      await tf.setBackend('webgpu');
+      const ok = await tf.setBackend(candidate);
+      if (!ok) continue;
       await tf.ready();
-      backend = 'webgpu';
+      backend = candidate;
       return;
     } catch (err) {
-      console.warn('Worker WebGPU failed, fallback CPU', err);
+      console.warn(`Cartoon worker backend ${candidate} failed`, err);
     }
   }
-  await tf.setBackend('cpu');
-  await tf.ready();
-  backend = 'cpu';
+  throw new Error('Brak działającego backendu TensorFlow.js');
+}
+
+async function warmup(size = 96) {
+  const warm = tf.zeros([1, size, size, 3]);
+  let out = null;
+  try {
+    // Ten GraphModel nie ma control-flow/dynamic output. execute() usuwa narzut
+    // executeAsync(); rzeczywiste GPU zakończy pracę przy await out.data().
+    const t = performance.now();
+    out = model.execute(warm);
+    if (Array.isArray(out)) out = out[0];
+    await out.data();
+    return performance.now() - t;
+  } finally {
+    warm.dispose();
+    out?.dispose?.();
+  }
 }
 
 async function init(msg) {
   try {
     tf.enableProdMode();
     style = msg.style || 'shinkai';
-    await chooseBackend();
+    await setPreferredBackend(msg.preferredBackend || 'auto');
     model = await tf.loadGraphModel(msg.modelUrl);
-    const warm = tf.zeros([1, 160, 160, 3]);
-    let out = null;
-    try {
-      const t = performance.now();
-      out = await model.executeAsync(warm);
-      if (Array.isArray(out)) out = out[0];
-      await out.data();
-      console.log(`Cartoon worker warmup ${backend}: ${Math.round(performance.now() - t)}ms`);
-    } finally {
-      warm.dispose();
-      out?.dispose?.();
-    }
-    self.postMessage({ type: 'ready', backend, style });
+    const first = await warmup(96);
+    const second = await warmup(96);
+    console.log(`Cartoon worker warmup ${backend}: ${Math.round(first)}ms -> ${Math.round(second)}ms`);
+    self.postMessage({ type: 'ready', backend, style, warmupMs: second });
   } catch (err) { postError(err); }
 }
 
@@ -66,13 +80,15 @@ async function infer(msg) {
     }
     input = tf.tensor4d(bgr, [1, size, size, 3], 'float32');
     const computeStart = performance.now();
-    output = await model.executeAsync(input);
+    output = model.execute(input);
     if (Array.isArray(output)) output = output[0];
     rendered = tf.tidy(() => output.squeeze([0]).reverse(2).mul(0.5).add(0.5).clipByValue(0, 1));
     const readStart = performance.now();
-    const pixels = await rendered.data(); // async GPU->CPU readback, ale WYŁĄCZNIE w Workerze
+    const pixels = await rendered.data();
     const readMs = performance.now() - readStart;
-    const computeMs = readStart - computeStart;
+    // GPU jest leniwe: computeMs do readStart mierzy enqueue, a pełna inferencja
+    // kończy się podczas data(). Raportujemy więc inferMs jako czas execute+read.
+    const inferMs = performance.now() - computeStart;
     const outRgba = new Uint8ClampedArray(size * size * 4);
     for (let i = 0, j = 0; i < pixels.length; i += 3, j += 4) {
       outRgba[j] = Math.max(0, Math.min(255, Math.round(pixels[i] * 255)));
@@ -84,7 +100,8 @@ async function infer(msg) {
       type: 'frame', requestId: msg.requestId, size,
       rgba: outRgba.buffer,
       totalMs: performance.now() - totalStart,
-      computeMs, readMs,
+      computeMs: inferMs,
+      readMs,
       backend
     }, [outRgba.buffer]);
   } catch (err) {
