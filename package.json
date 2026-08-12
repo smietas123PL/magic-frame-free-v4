@@ -1,6 +1,6 @@
 {
-  "name": "magic-frame-free-v9-1-performance",
-  "version": "9.1.0",
+  "name": "magic-frame-free-v9-2-cartoon-tfjs",
+  "version": "9.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.35",
-    "onnxruntime-web": "1.27.0"
+    "@tensorflow/tfjs": "4.22.0",
+    "@tensorflow/tfjs-backend-webgpu": "4.22.0",
+    "local-tfjs-models": "0.0.3"
   },
   "devDependencies": {
     "vite": "6.1.0"

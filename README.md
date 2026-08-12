@@ -1,33 +1,38 @@
-# Magic Frame Free v9.1 — Performance
+# Magic Frame Free v9.2 — CartoonGAN Light / TensorFlow.js
 
-Darmowa webowa aplikacja realtime: MediaPipe Hands + freeform/self-crossing quad + AnimeGANv2 uruchamiany lokalnie przez ONNX Runtime Web.
+Wersja v9.2 wymienia wolny AnimeGAN ONNX na lekki CartoonGAN przeznaczony do przeglądarki.
 
-## Co zmieniono w v9.1
+## Co zostało zachowane
 
-- `Anime FAST 256 · Shinkai` jest trybem domyślnym i wykonuje inference na 256×256.
-- `Anime QUALITY 512 · Face Portrait v2` pozostaje jako opcja jakościowa.
-- Latest-frame-wins: aplikacja nie kolejkuje klatek AI.
-- Tracking dłoni i compositing działają niezależnie od inference.
-- Wynik AI jest mapowany do aktualnego położenia wielokąta, a nie położenia z momentu rozpoczęcia inference.
-- Telemetria pokazuje backend, ms/klatkę AI, FPS AI, FPS renderera, FPS dłoni i rozdzielczość modelu.
+- MediaPipe Hand Landmarker 30 FPS
+- freeform quad z P0–P3
+- self-crossing `|><|`
+- low-latency smoothing i outlier rejection
+- latest-frame-wins (bez kolejki starych klatek)
+- nagrywanie canvas
 
-## Lokalnie
+## Nowy silnik anime
 
-```powershell
-npm install
-npm run dev
-```
+- TensorFlow.js GraphModel
+- CartoonGAN Light Shinkai / Paprika
+- lokalne modele kopiowane z `local-tfjs-models@0.0.3` podczas builda
+- automatyczny benchmark WebGPU vs WebGL
+- adaptacyjna rozdzielczość inference: 160 / 192 / 224 px
+- telemetria AI FPS / ms / hand FPS / render FPS
 
-## Build / Vercel
+## Build
 
 ```powershell
 npm install
 npm run build
-vercel --prod --yes
 ```
 
-Podczas `npm run build` skrypt pobiera modele i kopiuje runtime WASM do `public/`.
+`prepare-assets.mjs` kopiuje MediaPipe WASM oraz modele CartoonGAN do `public/`, więc po deploymencie przeglądarka nie pobiera modelu z zewnętrznego CDN.
 
-## Licencje modeli
+## Vercel
 
-Sprawdź warunki licencyjne AnimeGANv2 przed użyciem komercyjnym. Ten projekt jest przeznaczony do prototypowania i testów.
+Projekt jest zwykłym Vite SPA. `vercel --prod --yes` wystarczy, jeśli folder jest już połączony z istniejącym projektem Vercel.
+
+## Pochodzenie modeli
+
+CartoonGAN TFJS assets: `local-tfjs-models`, wywodzące się z `mnicnc404/CartoonGan-tensorflow`.
