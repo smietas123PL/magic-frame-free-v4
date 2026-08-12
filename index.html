@@ -5,32 +5,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
   <meta name="color-scheme" content="dark" />
-  <title>Magic Frame Free v6.1</title>
+  <title>Magic Frame Free v7</title>
 </head>
 <body>
   <main id="app">
     <section class="stage">
       <video id="video" playsinline muted></video>
       <canvas id="canvas"></canvas>
+      <canvas id="fxCanvas" hidden></canvas>
       <div id="status" class="status">Ładowanie JS…</div>
-      <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · twarz: —</div>
+      <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · twarz: — · FX: —</div>
     </section>
 
     <section class="controls">
       <button id="startBtn" class="primary">Uruchom kamerę</button>
       <select id="effectSelect" aria-label="Efekt obrazu">
-        <option value="anime">Anime Face</option>
-        <option value="comic">Comic Face</option>
-        <option value="clay">Clay Face</option>
-        <option value="cyber">Cyberpunk</option>
-        <option value="glitch">Glitch</option>
-        <option value="bw">B&amp;W</option>
+        <optgroup label="Twarz + scena">
+          <option value="anime">Anime Toon</option>
+          <option value="comic">Comic Toon</option>
+          <option value="clay">Clay Toon</option>
+        </optgroup>
+        <optgroup label="Scena">
+          <option value="cyber">Cyberpunk</option>
+          <option value="glitch">Glitch</option>
+          <option value="bw">B&amp;W Ink</option>
+        </optgroup>
       </select>
-      <label class="toggle"><input id="debugToggle" type="checkbox" /> Punkty dłoni i twarzy</label>
+      <label class="toggle"><input id="debugToggle" type="checkbox" /> Debug tracking</label>
     </section>
 
     <section class="help">
-      <p>v6.1: pokaż po prostu dwie dłonie — ramka aktywuje się od razu z kciuków i palców wskazujących. Ma mocniejsze wygładzanie i krótkie podtrzymanie przy zgubieniu dłoni. Face Landmarker nadal działa lokalnie. Bez płatnego API.</p>
+      <p><strong>v7:</strong> dwie dłonie sterują stabilnym „wirtualnym oknem”. Palce są uchwytami, a ramka zachowuje sensowne proporcje zamiast zapadać się do cienkiego quada. Efekt jest renderowany lokalnie przez WebGL i może korzystać z maski twarzy. Bez płatnego API.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>
   </main>

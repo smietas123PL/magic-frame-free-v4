@@ -1,30 +1,21 @@
-# Magic Frame Free v6.1
+# Magic Frame Free v7
 
-Darmowa aplikacja realtime pod Vercel: Vite + MediaPipe Hand Landmarker + Face Landmarker.
+Darmowy prototyp realtime pod Vercel: kamera + MediaPipe Hand/Face Landmarker + stabilna Virtual Frame + lokalny WebGL toon renderer.
 
-## Zmiany v6.1
-
-- ramka aktywuje się natychmiast po wykryciu 2 dłoni,
-- brak wymogu gestu L i wyprostowanych palców,
-- status pokazuje `0/2`, `1/2` lub `2/2 dłonie`,
-- mocniejsze wygładzanie ruchu ramki,
-- 550 ms podtrzymania ramki przy chwilowym zgubieniu dłoni,
-- zachowane efekty i Face Landmarker z v6,
-- brak płatnych API.
+## Co zmienia v7
+- ramka nie jest już surowym quadem z 4 fingertipów,
+- dłonie sterują pozycją, szerokością i obrotem stabilnego wirtualnego okna,
+- wysokość jest stabilizowana i ograniczana sensownymi proporcjami,
+- 700 ms hold przy chwilowym zgubieniu dłoni,
+- WebGL toon renderer: Anime, Comic, Clay, Cyberpunk, B&W,
+- Face Landmarker wzmacnia oczy/kontur dla efektów twarzy,
+- Debug pokazuje landmarki, uchwyty, oś virtual frame i maskę twarzy.
 
 ## Lokalnie
-
-```powershell
 npm install
 npm run dev
-```
 
 ## Build / Vercel
-
-```powershell
-npm install
 npm run build
-vercel --prod
-```
 
-Build kopiuje MediaPipe WASM z npm oraz pobiera oficjalne modele dłoni i twarzy do `public/models`.
+Build kopiuje WASM MediaPipe i pobiera modele Hand Landmarker + Face Landmarker do public/models.
