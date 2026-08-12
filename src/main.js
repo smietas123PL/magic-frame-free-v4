@@ -33,8 +33,9 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let recordingStartedAt = 0;
 
-const HAND_INTERVAL = 1000 / 36;
-const HAND_INIT_TIMEOUT_MS = 9000;
+const HAND_INTERVAL = 1000 / 30;
+const HAND_WASM_TIMEOUT_MS = 20000;
+const HAND_MODEL_FETCH_TIMEOUT_MS = 20000;
 const TRACK_HOLD_MS = 150;
 const TRACK_DROP_MS = 420;
 const MAX_PARTICLES = 1050;
@@ -152,12 +153,42 @@ function withTimeout(promise, ms, label) {
   ]).finally(() => clearTimeout(timer));
 }
 
+async function fetchModelBytes(modelPath, sourceLabel) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HAND_MODEL_FETCH_TIMEOUT_MS);
+  try {
+    handState = `${sourceLabel}: model download…`;
+    updateDiag();
+    const response = await fetch(modelPath, {
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`${sourceLabel} model HTTP ${response.status}`);
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength < 1000000) {
+      throw new Error(`${sourceLabel} model ma podejrzanie mały rozmiar: ${buffer.byteLength} B`);
+    }
+    return new Uint8Array(buffer);
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`${sourceLabel} model: timeout ${HAND_MODEL_FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function createHandsFrom(wasmPath, modelPath, sourceLabel) {
+  // Najpierw pobieramy model jawnie. Dzięki modelAssetBuffer MediaPipe nie wykonuje
+  // drugiego ukrytego requestu podczas inicjalizacji taska.
+  const modelBytes = await fetchModelBytes(modelPath, sourceLabel);
+
   handState = `${sourceLabel}: WASM…`;
   updateDiag();
   const vision = await withTimeout(
     FilesetResolver.forVisionTasks(wasmPath),
-    HAND_INIT_TIMEOUT_MS,
+    HAND_WASM_TIMEOUT_MS,
     `${sourceLabel} WASM`
   );
 
@@ -168,29 +199,22 @@ async function createHandsFrom(wasmPath, modelPath, sourceLabel) {
     minHandPresenceConfidence: 0.35,
     minTrackingConfidence: 0.4
   };
-  const base = { modelAssetPath: modelPath };
 
-  handState = `${sourceLabel}: model…`;
+  // v13.2: CPU jest celowym trybem startowym. W v13.1 GPU było obejmowane
+  // Promise.race z timeoutem; createFromOptions nie daje AbortSignal, więc po
+  // timeout GPU mógł nadal inicjalizować się w tle, podczas gdy startował CPU.
+  // To potrafiło zostawić tracking na 0 fps. Tutaj inicjalizacja jest pojedyncza.
+  handState = `${sourceLabel}: CPU init…`;
   updateDiag();
-  try {
-    const landmarker = await withTimeout(
-      HandLandmarker.createFromOptions(vision, {
-        ...common,
-        baseOptions: { ...base, delegate: 'GPU' }
-      }),
-      HAND_INIT_TIMEOUT_MS,
-      `${sourceLabel} model GPU`
-    );
-    return { landmarker, mode: `${sourceLabel}/GPU` };
-  } catch (gpuErr) {
-    console.warn('GPU hand landmarker failed, trying CPU', gpuErr);
-    const landmarker = await withTimeout(
-      HandLandmarker.createFromOptions(vision, { ...common, baseOptions: base }),
-      HAND_INIT_TIMEOUT_MS,
-      `${sourceLabel} model CPU`
-    );
-    return { landmarker, mode: `${sourceLabel}/CPU` };
-  }
+  const landmarker = await HandLandmarker.createFromOptions(vision, {
+    ...common,
+    baseOptions: {
+      modelAssetBuffer: modelBytes,
+      delegate: 'CPU'
+    }
+  });
+
+  return { landmarker, mode: `${sourceLabel}/CPU` };
 }
 
 async function initHands() {
@@ -204,7 +228,7 @@ async function initHands() {
     {
       label: 'LOCAL',
       wasm: '/mediapipe/wasm',
-      model: '/models/hand_landmarker.task'
+      model: '/models/hand_landmarker.task?v=13.2'
     },
     {
       label: 'CDN',
@@ -222,6 +246,7 @@ async function initHands() {
         handState = created.mode;
         handsReady = true;
         setStatus('Tracking dłoni gotowy · pokaż dłoń');
+        console.info(`HANDSTORM hand tracking ready: ${created.mode}`);
         return;
       } catch (err) {
         lastError = err;
@@ -232,13 +257,12 @@ async function initHands() {
   } catch (err) {
     handState = 'BŁĄD';
     console.error(err);
-    showError(`Tracking dłoni nie wystartował. ${err?.message || err}. Sprawdź DevTools → Network dla /models/hand_landmarker.task i /mediapipe/wasm.`);
+    showError(`Tracking dłoni nie wystartował. ${err?.message || err}. Otwórz DevTools → Network i sprawdź /models/hand_landmarker.task oraz /mediapipe/wasm.`);
   } finally {
     loadingHands = false;
     updateDiag();
   }
 }
-
 
 async function startCamera() {
   if (running) return;
@@ -956,4 +980,4 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 // Ładuj MediaPipe od razu, zanim użytkownik uruchomi kamerę.
 setTimeout(initHands, 10);
 updateDiag();
-setStatus('Gotowy · HANDSTORM v13.1 · ładowanie trackingu…');
+setStatus('Gotowy · HANDSTORM v13.2 · stabilny CPU tracking…');

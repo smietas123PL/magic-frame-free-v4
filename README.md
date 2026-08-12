@@ -1,4 +1,4 @@
-# Magic Frame — HANDSTORM v13.1
+# Magic Frame — HANDSTORM v13.2
 
 Ta wersja nie modyfikuje obrazu wewnątrz wielokąta. Kamera pozostaje oryginalna, a cała magia jest rysowana jako reaktywna warstwa animacji oparta o pełny tracking dłoni.
 
@@ -25,8 +25,16 @@ npm run dev
 Do kamery wymagany jest HTTPS albo localhost.
 
 
-## v13.1 reliability fix
+## v13.2 reliability fix
 - MediaPipe loads LOCAL first and automatically falls back to jsDelivr + Google model CDN.
 - Hand tracker initializes before the camera starts.
 - 9s init timeout exposes stuck loading instead of remaining on `load…`.
 - Lowered detection thresholds for easier first-lock.
+
+## v13.2 CPU-stable tracking fix
+
+- CPU-first HandLandmarker initialization (no overlapping GPU/CPU initialization race).
+- Model is fetched explicitly and passed as `modelAssetBuffer`.
+- Local model first, CDN fallback second.
+- Cancellable model download timeout and longer WASM timeout.
+- Hand inference capped at 30 Hz to leave render headroom for VFX.
