@@ -3,41 +3,46 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#000000" />
+  <meta name="theme-color" content="#03040a" />
   <meta name="color-scheme" content="dark" />
   <link rel="icon" href="data:," />
-  <title>Magic Frame Free v12.0.1 · Hybrid Anime Renderer</title>
+  <title>Magic Frame · HANDSTORM v13.1</title>
 </head>
 <body>
   <main id="app">
     <section class="stage">
       <video id="video" playsinline muted></video>
-      <canvas id="fxCanvas" hidden></canvas>
       <canvas id="canvas"></canvas>
-      <canvas id="animeCanvas" hidden width="128" height="128"></canvas>
-      <canvas id="inputCanvas" hidden width="128" height="128"></canvas>
-      <div id="status" class="status">Ładowanie JS…</div>
-      <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · twarz: — · FX: —</div>
+      <div class="brand"><span class="brand-dot"></span>HANDSTORM</div>
+      <div id="status" class="status">Gotowy · uruchom kamerę</div>
+      <div id="diag" class="diag">JS: OK · kamera: — · tracking: — · render: —</div>
       <div id="recBadge" class="rec-badge" hidden>● REC</div>
     </section>
 
     <section class="controls">
       <button id="startBtn" class="primary">Uruchom kamerę</button>
       <button id="recordBtn" class="secondary" disabled>Nagraj</button>
-      <select id="effectSelect" aria-label="Tryb efektu">
-        <option value="live">Anime Live · Cinematic</option>
-        <option value="live-soft">Anime Live · Soft</option>
-        <option value="live-strong">Anime Live · Strong / Manga</option>
-        <option value="ai-shinkai">AI Quality · Shinkai</option>
-        <option value="ai-paprika">AI Quality · Paprika</option>
-        <option value="original">Oryginał w ramce</option>
-      </select>
-      <label class="toggle"><input id="debugToggle" type="checkbox" /> Debug tracking</label>
+
+      <label class="field">
+        <span>Efekt</span>
+        <select id="effectSelect" aria-label="Tryb efektu">
+          <option value="quantum">Quantum Rift · portal + neon</option>
+          <option value="solar">Solar Flare · ogień + plazma</option>
+          <option value="void">Void Storm · kosmiczna burza</option>
+        </select>
+      </label>
+
+      <label class="field intensity-field">
+        <span>Moc efektu <strong id="intensityValue">100%</strong></span>
+        <input id="intensity" type="range" min="55" max="145" value="100" step="5" />
+      </label>
+
+      <label class="toggle"><input id="debugToggle" type="checkbox" /> Pokaż punkty trackingu</label>
     </section>
 
     <section class="help">
-      <p><strong>v12:</strong> Hybrid Anime łączy szybki WebGL dla całej sceny z lokalnym neural stylizerem tylko dla twarzy. Wynik AI jest stabilizowany FaceMesh-em i przesuwany/obracany w każdej klatce, więc nie musi być generowany w 30 FPS.</p>
-      <p>Domyślny Cinematic używa neural face crop 96×96 + FaceMesh stabilization. Gdy model jeszcze się ładuje, aplikacja automatycznie korzysta z szybkiej rekonstrukcji v11 jako fallback.</p>
+      <p><strong>Gesty:</strong> zbliż kciuk i palec wskazujący, aby odpalić singularity. Szybki ruch tworzy smugi i iskry. Zaciśnij pięść, naładuj energię i gwałtownie ją otwórz, aby odpalić burst. Dwie dłonie uruchamiają portal pomiędzy nimi.</p>
+      <p>Obraz z kamery jest rysowany bez filtrów. Efekt korzysta z pełnych 21 landmarków każdej dłoni i jest nakładany wyłącznie jako animacja.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>
   </main>
