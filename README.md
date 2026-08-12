@@ -1,24 +1,23 @@
-# Magic Frame Free v10.2 — Whole-scene Anime
+# Magic Frame Free v10.3 — Anime Reconstruction
 
-Cel tej wersji: podnieść podobieństwo do referencji bez ponownego wprowadzania laga GAN-a.
+Realtime browser effect for Vercel. v10.3 keeps the freeform/self-crossing hand frame and replaces the v10.2 comic-like rendering with a reconstruction-first Anime Live pipeline.
 
-## Co zmieniono
-- cały obszar ramki dostaje anime treatment, nie tylko twarz,
-- edge-preserving smoothing (bilateral-like),
-- wieloskalowy Sobel + czystszy ink,
-- 4–7 poziomów tonalnych i cel-shading,
-- heurystyczne uproszczenie skóry i ciemnych partii włosów,
-- mocniejszy face warp oraz stylizowane iris/catch-light,
-- clean under-stroke pod line-artem twarzy,
-- FX canvas ograniczony do 760 px szerokości dla płynności,
-- tracking/freeform/self-crossing `|><|` pozostaje bez zmian,
-- CartoonGAN zostaje wyłącznie jako opcjonalne AI Quality.
+## What changed
 
-## Tryby
-- Anime Live · Cinematic — domyślny balans,
-- Anime Live · Soft — subtelny,
-- Anime Live · Strong / Manga — mocniejszy line-art i płaskie cienie,
-- AI Quality · Shinkai/Paprika — wolny wariant porównawczy.
+- aggressive photographic micro-detail suppression before stylization
+- flatter skin reconstruction with fewer tonal bands
+- semantic/blurred edge detection to avoid beard/skin noise
+- simplified hair masses and anime color grading
+- selective face line-art only (eyes, brows, mouth, short nose hint, silhouette)
+- anime irises/pupils/catch-lights
+- same low-latency hand tracking and self-crossing `|><|` geometry
+- optional CartoonGAN remains for comparison only
 
-## Vercel
-`npm install && npm run build`, output `dist`.
+## Build
+
+```bash
+npm install
+npm run build
+```
+
+Vercel builds the project with `npm run build`.
