@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
   <meta name="color-scheme" content="dark" />
-  <title>Magic Frame Free v7.2</title>
+  <title>Magic Frame Free v8 Anime</title>
 </head>
 <body>
   <main id="app">
@@ -15,31 +15,24 @@
       <canvas id="fxCanvas" hidden></canvas>
       <div id="status" class="status">Ładowanie JS…</div>
       <div id="diag" class="diag">JS: … · kamera: — · dłonie: — · twarz: — · FX: —</div>
+      <div id="recBadge" class="rec-badge" hidden>● REC</div>
     </section>
 
     <section class="controls">
       <button id="startBtn" class="primary">Uruchom kamerę</button>
+      <button id="recordBtn" class="secondary" disabled>Nagraj</button>
       <select id="effectSelect" aria-label="Efekt obrazu">
-        <optgroup label="Twarz + scena">
-          <option value="anime">Anime Toon</option>
-          <option value="comic">Comic Toon</option>
-          <option value="clay">Clay Toon</option>
-        </optgroup>
-        <optgroup label="Scena">
-          <option value="cyber">Cyberpunk</option>
-          <option value="glitch">Glitch</option>
-          <option value="bw">B&amp;W Ink</option>
-        </optgroup>
+        <option value="anime">Anime v8</option>
+        <option value="original">Oryginał w ramce</option>
       </select>
       <label class="toggle"><input id="debugToggle" type="checkbox" /> Debug tracking</label>
     </section>
 
     <section class="help">
-      <p><strong>v7.2:</strong> cztery końcówki palców sterują swobodnym quadem bez wymuszania kątów 90°. Kształt może być trapezem, wklęsły albo samoprzecinający jak <code>|&gt;&lt;|</code>. Każdy narożnik śledzony jest osobno z minimalnym opóźnieniem. Bez płatnego API.</p>
+      <p><strong>v8 Anime:</strong> freeform/self-crossing quad + face-aware anime warp. Twarz dostaje większe oczy, węższą szczękę, gładszą skórę, uproszczone kolory i kontury. Nagrywanie zapisuje wyłącznie canvas z kamerą i efektem — bez UI.</p>
       <p id="errorDetails" class="error-details" hidden></p>
     </section>
   </main>
-
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

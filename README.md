@@ -1,33 +1,29 @@
-# Magic Frame Free v7.2
+# Magic Frame Free v8 — Anime focus
 
-Darmowy prototyp realtime pod Vercel: kamera + MediaPipe Hand/Face Landmarker + freeform/self-crossing quad + lokalny WebGL toon renderer.
+Darmowa aplikacja webowa realtime: MediaPipe Hands + Face Landmarker + freeform/self-crossing quad + lokalny WebGL2 anime renderer.
 
-## Co zmienia v7.2
+## Co zmieniono w v8
+- anime-only pipeline inspirowany klasycznym lookiem 2D: większe oczy, węższa szczęka, krótszy dół twarzy, skin smoothing, posterization i kontury,
+- face-aware deformation wykonywana lokalnie w shaderze WebGL2,
+- seam-free composite dla self-crossing quad: efekt jest rysowany raz przez maskę z dwóch trójkątów,
+- outlier rejection narożników bez zwiększania bezwładności,
+- nagrywanie samego canvas (bez UI) przez MediaRecorder,
+- fallback Canvas, jeśli WebGL2 jest niedostępny.
 
-- P0 = lewy index tip, P1 = prawy index tip, P2 = prawy thumb tip, P3 = lewy thumb tip.
-- Punkty nie są sortowane po obwodzie i nie są prostowane do prostokąta.
-- Dozwolone są quady wypukłe, wklęsłe i samoprzecinające (bow-tie / `|><|`).
-- Każdy narożnik ma osobny ultra-lekki filtr: 88–100% nowego pomiaru zależnie od szybkości ruchu.
-- Krótka predykcja ruchu kompensuje część jednej klatki opóźnienia.
-- Dropout hold skrócony do 90 ms.
-- Efekt jest kompozytowany jako dwa stałe trójkąty, więc przecięcie krawędzi nie jest automatycznie naprawiane.
-- Tożsamość lewej/prawej dłoni jest podtrzymywana także podczas krzyżowania rąk.
-- Debug pokazuje raw P0–P3 (turkus, przerywana linia) i finalny quad (niebieski).
-- Hand tracking celuje w 30 detekcji/s, kamera prosi o maks. 60 FPS.
-
-## Lokalnie
-
+## Uruchomienie
 ```powershell
 npm install
 npm run dev
 ```
 
 ## Build / Vercel
-
 ```powershell
+npm install
 npm run build
+vercel --prod --yes
 ```
 
-Build kopiuje WASM MediaPipe z npm i pobiera oficjalne modele Hand Landmarker oraz Face Landmarker do `public/models`.
+Modele MediaPipe są pobierane podczas `npm run build` przez `scripts/prepare-assets.mjs` i serwowane lokalnie z deploymentu.
 
-Nie jest potrzebny żaden płatny API key.
+## Ważne
+To nie jest diffusion/video-to-video. Nie generuje od zera nowej twarzy anime. To darmowa, lokalna stylizacja i deformacja oparta o Face Landmarker + WebGL2, zaprojektowana pod małe opóźnienie.
