@@ -1,6 +1,6 @@
 {
-  "name": "magic-frame-free-v10-3-anime-reconstruction",
-  "version": "10.3.0",
+  "name": "magic-frame-free-v10-4-clean-anime",
+  "version": "10.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,6 +15,10 @@
     "@tensorflow/tfjs-backend-webgl": "4.22.0",
     "local-tfjs-models": "0.0.3"
   },
-  "devDependencies": { "vite": "6.1.0" },
-  "engines": { "node": ">=18.18.0" }
+  "devDependencies": {
+    "vite": "6.1.0"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
 }
