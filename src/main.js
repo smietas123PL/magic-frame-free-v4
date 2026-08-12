@@ -34,8 +34,7 @@ let recordedChunks = [];
 let recordingStartedAt = 0;
 
 const HAND_INTERVAL = 1000 / 30;
-const HAND_WASM_TIMEOUT_MS = 20000;
-const HAND_MODEL_FETCH_TIMEOUT_MS = 20000;
+const HAND_MODEL_STALL_TIMEOUT_MS = 18000;
 const TRACK_HOLD_MS = 150;
 const TRACK_DROP_MS = 420;
 const MAX_PARTICLES = 1050;
@@ -143,39 +142,79 @@ async function requestCamera() {
   });
 }
 
-function withTimeout(promise, ms, label) {
-  let timer;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label}: timeout ${ms}ms`)), ms);
-    })
-  ]).finally(() => clearTimeout(timer));
-}
-
 async function fetchModelBytes(modelPath, sourceLabel) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HAND_MODEL_FETCH_TIMEOUT_MS);
+  let stallTimer = null;
+  let received = 0;
+  let lastUiAt = 0;
+
+  const armStallTimer = () => {
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => controller.abort(), HAND_MODEL_STALL_TIMEOUT_MS);
+  };
+
   try {
-    handState = `${sourceLabel}: model download…`;
+    handState = `${sourceLabel}: model 0 MB…`;
     updateDiag();
+    armStallTimer();
+
     const response = await fetch(modelPath, {
-      cache: 'no-store',
+      cache: 'reload',
       signal: controller.signal
     });
     if (!response.ok) throw new Error(`${sourceLabel} model HTTP ${response.status}`);
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength < 1000000) {
-      throw new Error(`${sourceLabel} model ma podejrzanie mały rozmiar: ${buffer.byteLength} B`);
+
+    const total = Number(response.headers.get('content-length')) || 0;
+    if (!response.body?.getReader) {
+      // Starsze przeglądarki: bez całkowitego timeoutu. Abortujemy tylko gdy
+      // przez długi czas nie ma odpowiedzi z sieci.
+      clearTimeout(stallTimer);
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength < 1000000) {
+        throw new Error(`${sourceLabel} model ma podejrzanie mały rozmiar: ${buffer.byteLength} B`);
+      }
+      return new Uint8Array(buffer);
     }
-    return new Uint8Array(buffer);
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    while (true) {
+      armStallTimer();
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      chunks.push(value);
+      received += value.byteLength;
+
+      const now = performance.now();
+      if (now - lastUiAt > 180) {
+        const got = (received / 1048576).toFixed(1);
+        const all = total ? `/${(total / 1048576).toFixed(1)}` : '';
+        handState = `${sourceLabel}: model ${got}${all} MB…`;
+        updateDiag();
+        lastUiAt = now;
+      }
+    }
+    clearTimeout(stallTimer);
+
+    if (received < 1000000) {
+      throw new Error(`${sourceLabel} model ma podejrzanie mały rozmiar: ${received} B`);
+    }
+
+    const merged = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return merged;
   } catch (err) {
     if (err?.name === 'AbortError') {
-      throw new Error(`${sourceLabel} model: timeout ${HAND_MODEL_FETCH_TIMEOUT_MS}ms`);
+      throw new Error(`${sourceLabel} model: brak transferu przez ${Math.round(HAND_MODEL_STALL_TIMEOUT_MS / 1000)}s`);
     }
     throw err;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(stallTimer);
   }
 }
 
@@ -186,11 +225,9 @@ async function createHandsFrom(wasmPath, modelPath, sourceLabel) {
 
   handState = `${sourceLabel}: WASM…`;
   updateDiag();
-  const vision = await withTimeout(
-    FilesetResolver.forVisionTasks(wasmPath),
-    HAND_WASM_TIMEOUT_MS,
-    `${sourceLabel} WASM`
-  );
+  // Nie ubijamy poprawnej inicjalizacji arbitralnym timeoutem. WASM jest
+  // mały, a źródła są próbowane sekwencyjnie.
+  const vision = await FilesetResolver.forVisionTasks(wasmPath);
 
   const common = {
     runningMode: 'VIDEO',
@@ -200,7 +237,7 @@ async function createHandsFrom(wasmPath, modelPath, sourceLabel) {
     minTrackingConfidence: 0.4
   };
 
-  // v13.2: CPU jest celowym trybem startowym. W v13.1 GPU było obejmowane
+  // v13.3: CPU jest celowym trybem startowym. W v13.1 GPU było obejmowane
   // Promise.race z timeoutem; createFromOptions nie daje AbortSignal, więc po
   // timeout GPU mógł nadal inicjalizować się w tle, podczas gdy startował CPU.
   // To potrafiło zostawić tracking na 0 fps. Tutaj inicjalizacja jest pojedyncza.
@@ -224,16 +261,22 @@ async function initHands() {
   updateDiag();
   showError('');
 
+  const googleModel = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
   const sources = [
+    {
+      label: 'GOOGLE',
+      wasm: '/mediapipe/wasm',
+      model: googleModel
+    },
     {
       label: 'LOCAL',
       wasm: '/mediapipe/wasm',
-      model: '/models/hand_landmarker.task?v=13.2'
+      model: '/models/hand_landmarker.task?v=13.3'
     },
     {
       label: 'CDN',
       wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
-      model: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+      model: googleModel
     }
   ];
 
@@ -954,7 +997,7 @@ function toggleRecording() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `handstorm-v13-${Date.now()}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
+    a.download = `handstorm-v13-3-${Date.now()}.${type.includes('mp4') ? 'mp4' : 'webm'}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
     recordBtn.textContent = 'Nagraj';
@@ -975,9 +1018,32 @@ effectSelect.addEventListener('change', () => {
   burstEnergy = 0;
 });
 window.addEventListener('pagehide', () => stream?.getTracks?.().forEach(track => track.stop()));
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+async function removeLegacyServiceWorker() {
+  if (!('serviceWorker' in navigator)) return false;
+  try {
+    const hadController = !!navigator.serviceWorker.controller;
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map(reg => reg.unregister()));
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(key => key.startsWith('magic-frame')).map(key => caches.delete(key)));
+    }
+    if (hadController && !sessionStorage.getItem('handstorm-sw-cleared-v13.3')) {
+      sessionStorage.setItem('handstorm-sw-cleared-v13.3', '1');
+      location.reload();
+      return true;
+    }
+    sessionStorage.removeItem('handstorm-sw-cleared-v13.3');
+  } catch (err) {
+    console.warn('Legacy Service Worker cleanup failed', err);
+  }
+  return false;
+}
 
-// Ładuj MediaPipe od razu, zanim użytkownik uruchomi kamerę.
-setTimeout(initHands, 10);
+// Ładuj MediaPipe od razu, ale najpierw usuń cache starego Service Workera.
+(async () => {
+  const reloading = await removeLegacyServiceWorker();
+  if (!reloading) setTimeout(initHands, 10);
+})();
 updateDiag();
-setStatus('Gotowy · HANDSTORM v13.2 · stabilny CPU tracking…');
+setStatus('Gotowy · HANDSTORM v13.3 · pobieranie modelu z kontrolą transferu…');

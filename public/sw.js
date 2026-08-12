@@ -1,19 +1,9 @@
-const CACHE = 'magic-frame-v13-2-handstorm-v1';
 self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', e => e.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim();})()));
-self.addEventListener('fetch', event => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-  const cacheable = /\.(task|wasm|json|bin|js|css)$/i.test(url.pathname) || url.pathname.includes('/models/') || url.pathname.includes('/mediapipe/');
-  if (!cacheable) return;
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE);
-    const cached = await cache.match(req);
-    if (cached) return cached;
-    const response = await fetch(req);
-    if (response.ok) cache.put(req, response.clone());
-    return response;
-  })());
-});
+self.addEventListener('activate', event => event.waitUntil((async () => {
+  try { await self.registration.unregister(); } catch {}
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(k => k.startsWith('magic-frame')).map(k => caches.delete(k)));
+  } catch {}
+  await self.clients.claim();
+})()));
