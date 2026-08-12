@@ -1,22 +1,25 @@
-import { mkdir, cp, access, writeFile } from 'node:fs/promises';
+import { mkdir, cp, access, writeFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const wasmSource = path.join(root, 'node_modules', '@mediapipe', 'tasks-vision', 'wasm');
-const wasmTarget = path.join(root, 'public', 'mediapipe', 'wasm');
 
-const models = [
+const mediapipeSource = path.join(root, 'node_modules', '@mediapipe', 'tasks-vision', 'wasm');
+const mediapipeTarget = path.join(root, 'public', 'mediapipe', 'wasm');
+const ortSource = path.join(root, 'node_modules', 'onnxruntime-web', 'dist');
+const ortTarget = path.join(root, 'public', 'ort');
+
+const assets = [
   {
     target: path.join(root, 'public', 'models', 'hand_landmarker.task'),
     url: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-    label: 'Hand Landmarker'
+    label: 'MediaPipe Hand Landmarker'
   },
   {
-    target: path.join(root, 'public', 'models', 'face_landmarker.task'),
-    url: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-    label: 'Face Landmarker'
+    target: path.join(root, 'public', 'models', 'face_paint_512_v2_0.onnx'),
+    url: 'https://huggingface.co/akhaliq/AnimeGANv2-ONNX/resolve/9d1a763dc816409bdf940e6eba51759d79679115/face_paint_512_v2_0.onnx?download=true',
+    label: 'AnimeGANv2 Face Portrait v2 ONNX'
   }
 ];
 
@@ -24,21 +27,30 @@ async function exists(file) {
   try { await access(file); return true; } catch { return false; }
 }
 
-async function ensureModel(model) {
-  await mkdir(path.dirname(model.target), { recursive: true });
-  if (await exists(model.target)) {
-    console.log(`[assets] ${model.label} already present.`);
+async function downloadAsset(asset) {
+  await mkdir(path.dirname(asset.target), { recursive: true });
+  if (await exists(asset.target)) {
+    console.log(`[assets] ${asset.label} already present.`);
     return;
   }
-  console.log(`[assets] Downloading official ${model.label} model...`);
-  const response = await fetch(model.url);
-  if (!response.ok) throw new Error(`${model.label} download failed: HTTP ${response.status}`);
+  console.log(`[assets] Downloading ${asset.label}...`);
+  const response = await fetch(asset.url, { redirect: 'follow' });
+  if (!response.ok) throw new Error(`${asset.label} download failed: HTTP ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
-  await writeFile(model.target, bytes);
-  console.log(`[assets] ${model.label} saved (${Math.round(bytes.byteLength / 1024 / 1024)} MB).`);
+  await writeFile(asset.target, bytes);
+  console.log(`[assets] ${asset.label} saved (${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB).`);
 }
 
-await mkdir(wasmTarget, { recursive: true });
-console.log('[assets] Copying MediaPipe WASM from node_modules...');
-await cp(wasmSource, wasmTarget, { recursive: true, force: true });
-for (const model of models) await ensureModel(model);
+await mkdir(mediapipeTarget, { recursive: true });
+console.log('[assets] Copying MediaPipe WASM...');
+await cp(mediapipeSource, mediapipeTarget, { recursive: true, force: true });
+
+await mkdir(ortTarget, { recursive: true });
+console.log('[assets] Copying ONNX Runtime Web runtime files...');
+for (const name of await readdir(ortSource)) {
+  if (name.startsWith('ort-wasm') || name.endsWith('.wasm')) {
+    await cp(path.join(ortSource, name), path.join(ortTarget, name), { force: true });
+  }
+}
+
+for (const asset of assets) await downloadAsset(asset);
